@@ -149,7 +149,7 @@
                     <th>時間</th>
                     <th>班別</th>
                     <th>課堂</th>
-                    <th>空閒教師 (可代課名單)</th>
+                    <th>空閒教師 (可代課名單) - 按當日空堂數排序</th>
                 </tr>
             </thead>
             <tbody id="teacher-schedule-body">
@@ -244,9 +244,39 @@
             });
             return occupiedSet;
         }
+
+        /**
+         * NEW: 計算指定日子每位教師的總空閒課堂數
+         * 用於排序空閒教師列表，空堂愈多排愈前
+         */
+        function calculateDailyFreeLessons(day) {
+            const dailySchedule = scheduleData.filter(item => item['日子'] === day);
+            const allTeachers = getAllTeachers();
+            const freeLessonCountMap = new Map();
+
+            // 初始化所有教師的空堂數為 0
+            allTeachers.forEach(teacher => {
+                freeLessonCountMap.set(teacher, 0);
+            });
+
+            // 遍歷當日所有排定的課堂 (即所有時段)
+            dailySchedule.forEach(lesson => {
+                const teachingNames = splitTeacherNames(lesson['上課教師']);
+                
+                // 檢查每位老師在該時段是否空閒
+                allTeachers.forEach(teacher => {
+                    if (!teachingNames.includes(teacher)) {
+                        // 如果老師沒有在這節課上課，則空堂數 +1
+                        freeLessonCountMap.set(teacher, freeLessonCountMap.get(teacher) + 1);
+                    }
+                });
+            });
+
+            return freeLessonCountMap;
+        }
         
         // ====================================================================
-        // 數據載入與初始化
+        // 數據載入與初始化 (保持不變)
         // ====================================================================
 
         function loadDataAndPopulateControls() {
@@ -322,7 +352,7 @@
         }
         
         // ====================================================================
-        // 1. 班級課表查詢
+        // 1. 班級課表查詢 (保持不變)
         // ====================================================================
 
         function displaySchedule() {
@@ -369,7 +399,7 @@
 
 
         // ====================================================================
-        // 2. 教師空閒查詢 (支持多教師輸入 & 按時間排序)
+        // 2. 教師空閒查詢 (已加入空堂數排序)
         // ====================================================================
         
         function displayTeacherSchedule() {
@@ -396,6 +426,8 @@
             
             let combinedTeacherLessons = [];
             const allTeachers = getAllTeachers(); 
+            // NEW: 計算當天所有教師的空堂數
+            const dailyFreeLessonsMap = calculateDailyFreeLessons(selectedDay); 
 
             // 遍歷所有輸入的教師姓名
             teacherNames.forEach(teacherName => {
@@ -443,17 +475,32 @@
                 // 渲染課堂行
                 const row = teacherScheduleBody.insertRow();
                 const lessonTime = lesson['時間'] || '---';
-                // const teachingNames = splitTeacherNames(lesson['上課教師']); // 已在 getOccupiedTeachers 中處理
 
                 totalLessonsCount++;
                 
                 // 找出該時段正在上課的所有教師
                 const occupiedTeachers = getOccupiedTeachers(selectedDay, lessonTime);
                 
-                // 計算空閒教師：所有教師 - 正在上課的教師 
-                const freeTeachers = allTeachers.filter(teacher => 
+                // 1. 過濾出該時段空閒的教師名單
+                const freeTeachersNames = allTeachers.filter(teacher => 
                     !occupiedTeachers.has(teacher)
                 );
+
+                // 2. 將姓名與空堂數綁定
+                const freeTeachersWithCount = freeTeachersNames.map(teacher => ({
+                    name: teacher,
+                    // 從步驟 1 的 Map 中獲取當天的空堂總數
+                    freeCount: dailyFreeLessonsMap.get(teacher) || 0 
+                }));
+
+                // 3. 排序：空堂數目多 (freeCount 大) 的排前面
+                freeTeachersWithCount.sort((a, b) => b.freeCount - a.freeCount);
+
+                // 4. 轉換回字串，並顯示空堂數 (e.g., "婷 (10)")
+                const freeTeachersString = freeTeachersWithCount
+                    .map(item => `${item.name} (${item.freeCount})`)
+                    .join(', ');
+
 
                 // 插入數據
                 row.insertCell().textContent = lessonTime;
@@ -461,7 +508,7 @@
                 row.insertCell().textContent = lesson['課堂'] || '---';
 
                 const freeTeachersCell = row.insertCell();
-                freeTeachersCell.textContent = freeTeachers.length > 0 ? freeTeachers.join(', ') : '無其他教師空閒';
+                freeTeachersCell.textContent = freeTeachersString || '無其他教師空閒';
             });
             
             teacherResultMessage.textContent = `✅ 成功顯示 ${selectedDay}，教師 ${teacherNames.join('、')} 的合併課堂安排 (共 ${totalLessonsCount} 節)。`;
