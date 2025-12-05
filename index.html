@@ -246,16 +246,21 @@
         }
 
         /**
-         * NEW: 計算指定日子每位教師的總空閒課堂數
-         * 修正邏輯：排除班主任課, 小息, 午餐。
+         * 修正後：計算指定日子每位教師的總空閒課堂數
+         * 邏輯：只計算在「有排課意義的獨特時段」中完全空閒的次數。
          */
         function calculateDailyFreeLessons(day) {
             const excludedLessons = ['班主任課', '小息', '午餐'];
-            // 過濾出實際有排課意義的時段 (排除非教學時段)
-            const dailySchedulableLessons = scheduleData.filter(item => 
-                item['日子'] === day && 
-                !excludedLessons.includes(item['課堂'])
-            );
+            
+            // 1. 找出當天所有「有排課意義」的**獨特時間時段**
+            const relevantUniqueTimeSlots = [...new Set(scheduleData
+                .filter(item => 
+                    item['日子'] === day && 
+                    !excludedLessons.includes(item['課堂'])
+                )
+                .map(item => item['時間']))
+            ];
+            // 由於排序在這裡並不影響結果，可省略排序，但保持程式碼清晰度。
 
             const allTeachers = getAllTeachers();
             const freeLessonCountMap = new Map();
@@ -265,14 +270,15 @@
                 freeLessonCountMap.set(teacher, 0);
             });
 
-            // 遍歷所有有排課意義的時段
-            dailySchedulableLessons.forEach(lesson => {
-                const teachingNames = splitTeacherNames(lesson['上課教師']);
+            // 2. 遍歷每個獨特且有排課意義的時間時段
+            relevantUniqueTimeSlots.forEach(timeSlot => {
+                // 3. 找出該時段所有班級的佔用教師
+                const occupiedSet = getOccupiedTeachers(day, timeSlot); 
                 
-                // 檢查每位老師在該「有排課意義」時段是否空閒
+                // 4. 針對所有教師，檢查他們是否在該時段完全空閒
                 allTeachers.forEach(teacher => {
-                    if (!teachingNames.includes(teacher)) {
-                        // 如果老師沒有在這節課上課，則空堂數 +1
+                    if (!occupiedSet.has(teacher)) {
+                        // 老師完全空閒，計數 +1 (只計數一次，因為是獨特時段)
                         freeLessonCountMap.set(teacher, freeLessonCountMap.get(teacher) + 1);
                     }
                 });
@@ -282,7 +288,7 @@
         }
         
         // ====================================================================
-        // 數據載入與初始化
+        // 數據載入與初始化 (保持不變)
         // ====================================================================
 
         function loadDataAndPopulateControls() {
@@ -405,7 +411,7 @@
 
 
         // ====================================================================
-        // 2. 教師空閒查詢 (支持多教師輸入 & 按時間排序 & 空堂排序)
+        // 2. 教師空閒查詢 (已加入空堂數排序)
         // ====================================================================
         
         function displayTeacherSchedule() {
@@ -432,7 +438,7 @@
             
             let combinedTeacherLessons = [];
             const allTeachers = getAllTeachers(); 
-            // 獲取當天所有教師的空堂數 (已修正，不計算非排課時段)
+            // 獲取當天所有教師的空堂數 (使用修正後的邏輯)
             const dailyFreeLessonsMap = calculateDailyFreeLessons(selectedDay); 
 
             // 遍歷所有輸入的教師姓名
