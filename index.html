@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>班級課堂查詢系統 (Live Server 自動導入)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f9;
+            color: #333;
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .controls {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #ecf0f1;
+            border-radius: 8px;
+        }
+        .select-group {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            margin-top: 15px;
+        }
+        label {
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            min-width: 150px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            background-color: white;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        #result-message {
+            margin-top: 15px;
+            font-style: italic;
+            font-weight: bold;
+            color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>班級課堂查詢系統</h1>
+    <p style="color: green;">✅ 正在自動載入 **`班別時間總表.csv`** 檔案...</p>
+
+    <div class="controls">
+        <div class="select-group">
+            <div>
+                <label for="day-select">選擇日子:</label>
+                <select id="day-select" disabled>
+                    <option>載入中...</option>
+                </select>
+            </div>
+            <div>
+                <label for="class-select">選擇班別:</label>
+                <select id="class-select" disabled>
+                    <option>載入中...</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div id="schedule-output">
+        <table>
+            <thead>
+                <tr>
+                    <th>時間</th>
+                    <th>課堂</th>
+                    <th>上課教師</th>
+                    <th>可代課教師</th>
+                </tr>
+            </thead>
+            <tbody id="schedule-body">
+                <tr><td colspan="4" style="text-align: center;">數據載入中，請稍候...</td></tr>
+            </tbody>
+        </table>
+        <p id="result-message"></p>
+    </div>
+
+    <script>
+        // 設定要自動載入的 CSV 檔案路徑
+        const CSV_FILE_PATH = "班別時間總表.csv"; 
+        
+        // 用來儲存從 CSV 解析出來的課表數據
+        let scheduleData = []; 
+
+        // DOM 元素引用
+        const daySelect = document.getElementById('day-select');
+        const classSelect = document.getElementById('class-select');
+        const scheduleBody = document.getElementById('schedule-body');
+        const resultMessage = document.getElementById('result-message');
+        
+        // ====================================================================
+        // 核心功能：自動載入數據
+        // ====================================================================
+
+        /**
+         * 使用 PapaParse 從 Live Server 載入遠端檔案
+         */
+        function loadDataAndPopulateControls() {
+            // 清除上次的訊息
+            resultMessage.textContent = ''; 
+            
+            Papa.parse(CSV_FILE_PATH, {
+                download: true,         // 關鍵設定：啟用遠端檔案下載
+                header: true,           // 將第一行視為標題行，生成物件陣列
+                skipEmptyLines: true,   // 跳過空行
+                dynamicTyping: true,    // 自動轉換數字類型
+                complete: function(results) {
+                    scheduleData = results.data; 
+
+                    if (scheduleData.length === 0 || !scheduleData[0]['日子'] || !scheduleData[0]['班別']) {
+                        const errorMsg = "檔案中沒有有效數據，或欄位標題不正確 (應為 '日子', '班別', '時間', '課堂', '上課教師', '可代課教師')。";
+                        console.error(errorMsg);
+                        resultMessage.textContent = `❌ 數據載入失敗：${errorMsg}`;
+                        daySelect.disabled = true;
+                        classSelect.disabled = true;
+                        return;
+                    }
+                    
+                    // 檔案成功載入後，更新控制項和顯示課表
+                    populateControls();
+                },
+                error: function(err) {
+                    console.error("PapaParse Error:", err);
+                    resultMessage.textContent = `❌ 載入檔案失敗。請確認檔案 "${CSV_FILE_PATH}" 存在，並使用 Live Server 開啟本頁面。`;
+                    daySelect.disabled = true;
+                    classSelect.disabled = true;
+                    scheduleBody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: red;">檔案載入失敗，請檢查主控台錯誤訊息。</td></tr>`;
+                }
+            });
+        }
+
+        // ====================================================================
+        // 輔助功能：填充選單和顯示課表 (與前一個版本相同)
+        // ====================================================================
+
+        function populateControls() {
+            // 啟用下拉選單
+            daySelect.disabled = false;
+            classSelect.disabled = false;
+            
+            const allDays = [...new Set(scheduleData.map(item => item['日子']).filter(Boolean))];
+            const allClasses = [...new Set(scheduleData.map(item => item['班別']).filter(Boolean))];
+
+            populateSelect(daySelect, allDays, '日子');
+            populateSelect(classSelect, allClasses, '班別');
+            
+            // 預設選中第一個選項
+            if (allDays.length > 0) daySelect.value = allDays[0];
+            if (allClasses.length > 0) classSelect.value = allClasses[0];
+
+            displaySchedule();
+        }
+
+        function populateSelect(selectElement, options, name) {
+            selectElement.innerHTML = ''; 
+            
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = `--- 請選擇 ${name} ---`;
+            selectElement.appendChild(defaultOption);
+
+            options.forEach(option => {
+                const opt = document.createElement('option');
+                opt.value = option;
+                opt.textContent = option;
+                selectElement.appendChild(opt);
+            });
+        }
+
+        function displaySchedule() {
+            if (scheduleData.length === 0) return;
+
+            const selectedDay = daySelect.value;
+            const selectedClass = classSelect.value;
+
+            scheduleBody.innerHTML = '';
+            resultMessage.textContent = '';
+
+            if (!selectedDay || !selectedClass) {
+                resultMessage.textContent = '請選擇日子和班別以查看課表。';
+                scheduleBody.innerHTML = `<tr><td colspan="4" style="text-align: center;">請選擇日子和班別。</td></tr>`;
+                return;
+            }
+
+            const filteredSchedule = scheduleData.filter(item => 
+                item['日子'] === selectedDay && item['班別'] === selectedClass
+            );
+
+            if (filteredSchedule.length === 0) {
+                scheduleBody.innerHTML = `<tr><td colspan="4" style="text-align: center;">在 ${selectedDay}，${selectedClass} 班沒有找到課表數據。</td></tr>`;
+                resultMessage.textContent = '';
+                return;
+            }
+
+            filteredSchedule.forEach(lesson => {
+                const row = scheduleBody.insertRow();
+                
+                const getTime = lesson['時間'] || '---';
+                const getLesson = lesson['課堂'] || '---';
+                const getTeacher = lesson['上課教師'] || '---';
+                const getSubTeachers = lesson['可代課教師'] || '---';
+
+                row.insertCell().textContent = getTime;
+                row.insertCell().textContent = getLesson;
+                row.insertCell().textContent = getTeacher;
+                row.insertCell().textContent = getSubTeachers;
+            });
+            
+            resultMessage.textContent = `✅ 成功顯示 ${selectedDay}, ${selectedClass} 班的課表 (共 ${filteredSchedule.length} 節)。`;
+        }
+
+        // ====================================================================
+        // 初始化
+        // ====================================================================
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // 監聽選擇改變事件
+            daySelect.addEventListener('change', displaySchedule);
+            classSelect.addEventListener('change', displaySchedule);
+            
+            // 頁面載入後自動載入數據
+            loadDataAndPopulateControls();
+        });
+
+    </script>
+
+</body>
+</html>
