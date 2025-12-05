@@ -254,9 +254,9 @@
             const allTeachers = getAllTeachers();
             const freeLessonCountMap = new Map();
 
-            // 初始化所有教師的空堂數為 0
+            // 初始化所有教師的空堂數為 -500
             allTeachers.forEach(teacher => {
-                freeLessonCountMap.set(teacher, 0);
+                freeLessonCountMap.set(teacher, -500);
             });
 
             // 遍歷當日所有排定的課堂 (即所有時段)
@@ -534,3 +534,4 @@
 
 </body>
 </html>
+
