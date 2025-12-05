@@ -180,21 +180,33 @@
         // ====================================================================
 
         /**
+         * 將時間字串 (e.g., "08:00-08:15") 轉換為分鐘數，以便比較
+         */
+        function timeToMinutes(timeString) {
+            if (!timeString || typeof timeString !== 'string') return 0;
+            const startTime = timeString.split('-')[0].trim(); 
+            const parts = startTime.split(':');
+            if (parts.length !== 2) return 0;
+            
+            const hours = parseInt(parts[0], 10);
+            const minutes = parseInt(parts[1], 10);
+            return hours * 60 + minutes;
+        }
+
+
+        /**
          * 將包含多個教師姓名的字串（用 /、／、+ 分隔）分割成陣列
-         * @param {string} teacherString - 來自 CSV 的教師姓名欄位字串
-         * @returns {Array<string>} - 處理後的教師姓名陣列
          */
         function splitTeacherNames(teacherString) {
             if (!teacherString) return [];
-            // 使用正規表達式匹配 / (半形)、／ (全形)、+ 作為分隔符
             return String(teacherString)
                 .split(/[\/\／+]+/) 
-                .map(name => name.trim()) // 清理兩側空白
-                .filter(name => name.length > 0); // 移除空字串
+                .map(name => name.trim()) 
+                .filter(name => name.length > 0);
         }
 
         /**
-         * 提取所有不重複的教師姓名（從 '上課教師' 和 '可代課教師' 欄位）
+         * 提取所有不重複的教師姓名
          */
         function getAllTeachers() {
             if (allTeachersCache) return allTeachersCache;
@@ -225,7 +237,6 @@
             scheduleData.forEach(item => {
                 if (item['日子'] === day && item['時間'] === time) {
                     if (item['上課教師']) {
-                        // 使用分割函數處理 '上課教師'
                         const teachingNames = splitTeacherNames(item['上課教師']);
                         teachingNames.forEach(name => occupiedSet.add(name));
                     }
@@ -358,14 +369,13 @@
 
 
         // ====================================================================
-        // 2. 教師空閒查詢 (支持多教師輸入)
+        // 2. 教師空閒查詢 (支持多教師輸入 & 按時間排序)
         // ====================================================================
         
         function displayTeacherSchedule() {
             if (scheduleData.length === 0) return;
 
             const selectedDay = daySelect.value;
-            // 解析多個教師姓名 (以空格, 逗號, 全形逗號分隔)
             const rawInput = teacherNameInput.value.trim(); 
             const teacherNames = rawInput.split(/[\s,，]+/).filter(name => name.length > 0);
             
@@ -392,13 +402,19 @@
                 // 篩選出該教師在當天是「上課教師」的所有課堂
                 const targetTeacherLessons = scheduleData.filter(item => {
                     if (item['日子'] !== selectedDay) return false;
-                    
-                    // 檢查目標教師姓名是否存在於上課教師欄位中
                     const teachingNames = splitTeacherNames(item['上課教師']);
                     return teachingNames.includes(teacherName);
                 });
                 
                 if (targetTeacherLessons.length > 0) {
+                    
+                    // 按時間排序
+                    targetTeacherLessons.sort((a, b) => {
+                        const timeA = timeToMinutes(a['時間']);
+                        const timeB = timeToMinutes(b['時間']);
+                        return timeA - timeB; 
+                    });
+                    
                     // 插入標頭行用於分隔不同教師的課表
                     combinedTeacherLessons.push({ isHeader: true, name: teacherName });
                     combinedTeacherLessons.push(...targetTeacherLessons);
@@ -427,13 +443,14 @@
                 // 渲染課堂行
                 const row = teacherScheduleBody.insertRow();
                 const lessonTime = lesson['時間'] || '---';
-                const teachingNames = splitTeacherNames(lesson['上課教師']); // 獲取所有任教教師
+                // const teachingNames = splitTeacherNames(lesson['上課教師']); // 已在 getOccupiedTeachers 中處理
+
                 totalLessonsCount++;
                 
                 // 找出該時段正在上課的所有教師
                 const occupiedTeachers = getOccupiedTeachers(selectedDay, lessonTime);
                 
-                // 計算空閒教師：所有教師 - 正在上課的教師 (確保排除該時段任教的所有老師)
+                // 計算空閒教師：所有教師 - 正在上課的教師 
                 const freeTeachers = allTeachers.filter(teacher => 
                     !occupiedTeachers.has(teacher)
                 );
