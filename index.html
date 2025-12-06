@@ -45,16 +45,16 @@
         label {
             font-weight: bold;
             margin-right: 5px;
+            /* 讓標籤在輸入框寬度改變時不會太快換行 */
+            white-space: nowrap; 
         }
+        /* 統一所有輸入框的樣式，使其寬度一致且具彈性 */
         select, input[type="text"] {
             padding: 8px;
             border-radius: 4px;
             border: 1px solid #ccc;
             min-width: 150px;
-            flex-grow: 1;
-        }
-        input[type="text"].small-input {
-            max-width: 300px;
+            flex-grow: 1; /* 讓輸入框佔用剩餘空間，確保寬度一致 */
         }
         table {
             width: 100%;
@@ -150,8 +150,8 @@
     
     <div class="controls">
         <div class="input-full-width">
-            <label for="teacher-name-input">輸入查詢教師姓名 (可輸入多個):</label>
-            <input type="text" id="teacher-name-input" placeholder="例如: 婷 鴻" disabled class="small-input">
+            <label for="teacher-name-input">輸入需要課堂調動教師姓名:</label>
+            <input type="text" id="teacher-name-input" placeholder="例如: 婷 鴻" disabled>
         </div>
         
         <div class="input-full-width">
@@ -201,7 +201,7 @@
         const teacherScheduleBody = document.getElementById('teacher-schedule-body');
         const teacherResultMessage = document.getElementById('teacher-result-message');
         
-        // NEW Inputs
+        // New Inputs
         const priorityTeacherInput = document.getElementById('priority-teacher-input');
         const dutyTeacherInput = document.getElementById('duty-teacher-input');
         
@@ -258,7 +258,7 @@
         }
 
         /**
-         * NEW: 根據教師等級和優先代課狀態返回帶有顏色的 HTML 標籤 (專門用於空閒名單)
+         * 根據教師等級和優先代課狀態返回帶有顏色的 HTML 標籤 (專門用於空閒名單)
          * 優先級：橙色 > 紅色 (P) / 藍色 (S) > 黑色 (無 Grade)
          */
         function getFreeListStyledTeacherName(teacherName, isPriority) {
@@ -441,7 +441,6 @@
             daySelect.disabled = false;
             classSelect.disabled = false;
             teacherNameInput.disabled = false;
-            // NEW: 啟用新的輸入欄位
             priorityTeacherInput.disabled = false; 
             dutyTeacherInput.disabled = false;
             
@@ -546,7 +545,6 @@
             const rawInput = teacherNameInput.value.trim(); 
             const teacherNames = splitTeacherList(rawInput);
             
-            // NEW: 獲取優先和排除名單 (使用 Set 以便快速查找)
             const priorityTeachers = new Set(splitTeacherList(priorityTeacherInput.value.trim()));
             const dutyTeachers = new Set(splitTeacherList(dutyTeacherInput.value.trim()));
 
@@ -618,7 +616,7 @@
                     !occupiedTeachers.has(teacher) && 
                     // 檢查這位老師是否不在輸入的查詢名單中
                     !teacherNames.includes(teacher) &&
-                    // NEW: 檢查這位老師是否不在公務名單中
+                    // 檢查這位老師是否不在公務名單中 (NEW)
                     !dutyTeachers.has(teacher)
                 );
 
@@ -628,7 +626,7 @@
                     freeCount: dailyFreeLessonsMap.get(teacher) || 0 
                 }));
 
-                // 3. 排序：優先老師 > 空堂數多者
+                // 3. 排序：優先老師 > 空堂數多者 (NEW LOGIC)
                 freeTeachersWithCount.sort((a, b) => {
                     const aIsPriority = priorityTeachers.has(a.name);
                     const bIsPriority = priorityTeachers.has(b.name);
