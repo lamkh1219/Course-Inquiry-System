@@ -34,6 +34,13 @@
             gap: 20px;
             align-items: center;
             margin-top: 15px;
+            flex-wrap: wrap; /* 允許換行 */
+        }
+        .input-full-width {
+            flex: 1 1 100%; /* 佔滿整行 */
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
         }
         label {
             font-weight: bold;
@@ -44,6 +51,10 @@
             border-radius: 4px;
             border: 1px solid #ccc;
             min-width: 150px;
+            flex-grow: 1;
+        }
+        input[type="text"].small-input {
+            max-width: 300px;
         }
         table {
             width: 100%;
@@ -135,12 +146,22 @@
 
     <hr>
     <h2>2. 教師空閒查詢 (Teacher Free Time Lookup)</h2>
-    <p>ℹ️ **P Grade** 教師以 <span style="color: red; font-weight: bold;">紅色</span> 顯示，**S Grade** 教師以 <span style="color: blue; font-weight: bold;">藍色</span> 顯示。空閒教師名單會顯示其當日空堂總數。</p>
+    <p>ℹ️ **P Grade**/<span style="color: red; font-weight: bold;">紅色</span>，**S Grade**/<span style="color: blue; font-weight: bold;">藍色</span>。優先代課老師以 <span style="color: orange; font-weight: bold;">橙色</span> 顯示並排最前。</p>
     
     <div class="controls">
-        <div class="select-group">
-            <label for="teacher-name-input">輸入教師姓名 (可輸入多個，以空格、逗號或斜線分隔):</label>
-            <input type="text" id="teacher-name-input" placeholder="例如: 婷 鴻" disabled>
+        <div class="input-full-width">
+            <label for="teacher-name-input">輸入查詢教師姓名 (可輸入多個):</label>
+            <input type="text" id="teacher-name-input" placeholder="例如: 婷 鴻" disabled class="small-input">
+        </div>
+        
+        <div class="input-full-width">
+            <label for="priority-teacher-input" style="color: orange;">優先代課老師名單 (橙色，排最前):</label>
+            <input type="text" id="priority-teacher-input" placeholder="例如: 雅 魏" disabled>
+        </div>
+        
+        <div class="input-full-width">
+            <label for="duty-teacher-input" style="color: #900;">已有公務老師名單 (排除名單):</label>
+            <input type="text" id="duty-teacher-input" placeholder="例如: 盧 欣" disabled>
         </div>
     </div>
     
@@ -151,7 +172,7 @@
                     <th>時間</th>
                     <th>班別</th>
                     <th>課堂</th>
-                    <th>空閒教師 (可代課名單) - 按當日空堂數排序</th>
+                    <th>空閒教師 (可代課名單) - 按優先級及空堂數排序</th>
                 </tr>
             </thead>
             <tbody id="teacher-schedule-body">
@@ -179,6 +200,10 @@
         const teacherNameInput = document.getElementById('teacher-name-input');
         const teacherScheduleBody = document.getElementById('teacher-schedule-body');
         const teacherResultMessage = document.getElementById('teacher-result-message');
+        
+        // NEW Inputs
+        const priorityTeacherInput = document.getElementById('priority-teacher-input');
+        const dutyTeacherInput = document.getElementById('duty-teacher-input');
         
         // ====================================================================
         // 核心輔助功能
@@ -211,7 +236,7 @@
         }
 
         /**
-         * 根據教師等級返回帶有顏色的 HTML 標籤
+         * 根據教師等級返回帶有顏色的 HTML 標籤 (用於班級課表和查詢標頭)
          */
         function getStyledTeacherName(teacherName) {
             if (!teacherName || teacherName === '---') return teacherName;
@@ -228,6 +253,33 @@
             if (colorStyle) {
                 // 使用 innerHTML 進行渲染，必須返回帶 <span> 的 HTML 字串
                 return `<span style="${colorStyle}">${teacherName}</span>`;
+            }
+            return teacherName;
+        }
+
+        /**
+         * NEW: 根據教師等級和優先代課狀態返回帶有顏色的 HTML 標籤 (專門用於空閒名單)
+         * 優先級：橙色 > 紅色 (P) / 藍色 (S) > 黑色 (無 Grade)
+         */
+        function getFreeListStyledTeacherName(teacherName, isPriority) {
+            if (!teacherName || teacherName === '---') return teacherName;
+
+            let color = 'inherit'; // 預設顏色
+            
+            if (isPriority) {
+                color = 'orange'; // 優先顯示橙色
+            } else {
+                // 檢查 P/S Grade
+                const grade = teacherGradesMap.get(teacherName);
+                if (grade === 'P') {
+                    color = 'red';
+                } else if (grade === 'S') {
+                    color = 'blue';
+                }
+            }
+
+            if (color !== 'inherit') {
+                return `<span style="color: ${color}; font-weight: bold;">${teacherName}</span>`;
             }
             return teacherName;
         }
@@ -279,7 +331,6 @@
         function calculateDailyFreeLessons(day) {
             const excludedLessons = ['班主任課', '小息', '午餐'];
             
-            // 1. 找出當天所有「有排課意義」的**獨特時間時段**
             const relevantUniqueTimeSlots = [...new Set(scheduleData
                 .filter(item => 
                     item['日子'] === day && 
@@ -295,12 +346,9 @@
                 freeLessonCountMap.set(teacher, 0);
             });
 
-            // 2. 遍歷每個獨特且有排課意義的時間時段
             relevantUniqueTimeSlots.forEach(timeSlot => {
-                // 3. 找出該時段所有班級的佔用教師
                 const occupiedSet = getOccupiedTeachers(day, timeSlot); 
                 
-                // 4. 針對所有教師，檢查他們是否在該時段完全空閒
                 allTeachers.forEach(teacher => {
                     if (!occupiedSet.has(teacher)) {
                         freeLessonCountMap.set(teacher, freeLessonCountMap.get(teacher) + 1);
@@ -319,7 +367,6 @@
              resultMessage.textContent = '載入排課表...'; 
              teacherResultMessage.textContent = '載入排課表...';
             
-            // 異步載入排課表數據
             Papa.parse(CSV_FILE_PATH, {
                 download: true,         
                 header: true,           
@@ -335,11 +382,12 @@
                         daySelect.disabled = true;
                         classSelect.disabled = true;
                         teacherNameInput.disabled = true; 
+                        priorityTeacherInput.disabled = true; 
+                        dutyTeacherInput.disabled = true; 
                         return;
                     }
                     
                     resultMessage.textContent = '載入排課表成功。載入教師等級檔案...'; 
-                    // 載入第二個檔案：教師等級
                     loadTeacherGrades();
                 },
                 error: function(err) {
@@ -349,6 +397,8 @@
                     daySelect.disabled = true;
                     classSelect.disabled = true;
                     teacherNameInput.disabled = true; 
+                    priorityTeacherInput.disabled = true; 
+                    dutyTeacherInput.disabled = true; 
                 }
             });
         }
@@ -376,13 +426,11 @@
                         }
                     }
                     
-                    // 兩個檔案都載入完畢後，開始初始化控制項和顯示數據
                     populateControls();
                 },
                 error: function(err) {
                     console.error("PapaParse Grade Error:", err);
                     teacherResultMessage.textContent = `❌ 載入教師等級檔案失敗。請確認檔案 "${GRADE_FILE_PATH}" 存在。`;
-                    // 即使等級檔案失敗，仍嘗試初始化和顯示課表，只是不會有顏色
                     populateControls();
                 }
             });
@@ -393,6 +441,9 @@
             daySelect.disabled = false;
             classSelect.disabled = false;
             teacherNameInput.disabled = false;
+            // NEW: 啟用新的輸入欄位
+            priorityTeacherInput.disabled = false; 
+            dutyTeacherInput.disabled = false;
             
             getAllTeachers(); 
 
@@ -476,7 +527,6 @@
                 row.insertCell().textContent = getTime;
                 row.insertCell().textContent = getLesson;
                 
-                // 使用 innerHTML 渲染帶顏色的教師姓名
                 row.insertCell().innerHTML = styledTeachers || '---'; 
                 row.insertCell().innerHTML = styledSubTeachers || '---';
             });
@@ -486,7 +536,7 @@
 
 
         // ====================================================================
-        // 2. 教師空閒查詢 (已修正：排除查詢教師)
+        // 2. 教師空閒查詢 (已修正：排除查詢教師、加入優先/公務排除)
         // ====================================================================
         
         function displayTeacherSchedule() {
@@ -494,9 +544,12 @@
 
             const selectedDay = daySelect.value;
             const rawInput = teacherNameInput.value.trim(); 
-            // 獲取所有正在被查詢的教師名單
             const teacherNames = splitTeacherList(rawInput);
             
+            // NEW: 獲取優先和排除名單 (使用 Set 以便快速查找)
+            const priorityTeachers = new Set(splitTeacherList(priorityTeacherInput.value.trim()));
+            const dutyTeachers = new Set(splitTeacherList(dutyTeacherInput.value.trim()));
+
             teacherScheduleBody.innerHTML = '';
             teacherResultMessage.textContent = '';
 
@@ -518,7 +571,6 @@
 
             // 遍歷所有輸入的教師姓名
             teacherNames.forEach(teacherName => {
-                // 篩選出該教師在當天是「上課教師」的所有課堂
                 const targetTeacherLessons = scheduleData.filter(item => {
                     if (item['日子'] !== selectedDay) return false;
                     const teachingNames = splitTeacherList(item['上課教師']);
@@ -527,14 +579,8 @@
                 
                 if (targetTeacherLessons.length > 0) {
                     
-                    // 按時間排序
-                    targetTeacherLessons.sort((a, b) => {
-                        const timeA = timeToMinutes(a['時間']);
-                        const timeB = timeToMinutes(b['時間']);
-                        return timeA - timeB; 
-                    });
+                    targetTeacherLessons.sort((a, b) => timeToMinutes(a['時間']) - timeToMinutes(b['時間']));
                     
-                    // 插入標頭行，並對教師姓名使用樣式
                     const styledHeaderName = getStyledTeacherName(teacherName);
                     combinedTeacherLessons.push({ isHeader: true, name: styledHeaderName });
                     combinedTeacherLessons.push(...targetTeacherLessons);
@@ -550,10 +596,8 @@
             // 渲染合併後的課表
             combinedTeacherLessons.forEach(lesson => {
                 if (lesson.isHeader) {
-                    // 渲染教師分隔標頭
                     const row = teacherScheduleBody.insertRow();
                     row.className = 'teacher-header-row';
-                    // 這裡 lesson.name 已經是帶有 HTML 樣式的字串
                     row.insertCell().innerHTML = `教師: ${lesson.name}`; 
                     row.insertCell().colSpan = 3;
                     row.cells[0].colSpan = 1; 
@@ -561,7 +605,6 @@
                     return;
                 }
                 
-                // 渲染課堂行
                 const row = teacherScheduleBody.insertRow();
                 const lessonTime = lesson['時間'] || '---';
 
@@ -573,8 +616,10 @@
                 const freeTeachersNames = allTeachers.filter(teacher => 
                     // 檢查這位老師是否沒有在上課
                     !occupiedTeachers.has(teacher) && 
-                    // NEW: 檢查這位老師是否不在輸入的名單中 (即排除正在被查詢的老師)
-                    !teacherNames.includes(teacher)
+                    // 檢查這位老師是否不在輸入的查詢名單中
+                    !teacherNames.includes(teacher) &&
+                    // NEW: 檢查這位老師是否不在公務名單中
+                    !dutyTeachers.has(teacher)
                 );
 
                 // 2. 將姓名與空堂數綁定
@@ -583,13 +628,28 @@
                     freeCount: dailyFreeLessonsMap.get(teacher) || 0 
                 }));
 
-                // 3. 排序：空堂數目多 (freeCount 大) 的排前面
-                freeTeachersWithCount.sort((a, b) => b.freeCount - a.freeCount);
+                // 3. 排序：優先老師 > 空堂數多者
+                freeTeachersWithCount.sort((a, b) => {
+                    const aIsPriority = priorityTeachers.has(a.name);
+                    const bIsPriority = priorityTeachers.has(b.name);
 
-                // 4. 轉換回字串，使用 getStyledTeacherName 函數
+                    // 優先老師排在前面
+                    if (aIsPriority && !bIsPriority) return -1;
+                    if (!aIsPriority && bIsPriority) return 1;
+                    
+                    // 兩者都不是優先老師，或兩者都是，則按空堂數目降序排列
+                    return b.freeCount - a.freeCount;
+                });
+
+                // 4. 轉換回字串，使用 getFreeListStyledTeacherName 函數
                 const freeTeachersString = freeTeachersWithCount
-                    // 對名稱應用樣式，並與空堂數結合
-                    .map(item => `${getStyledTeacherName(item.name)} (${item.freeCount})`)
+                    .map(item => {
+                        // 判斷是否為優先老師
+                        const isPriority = priorityTeachers.has(item.name);
+                        // 應用樣式和空堂數
+                        const styledName = getFreeListStyledTeacherName(item.name, isPriority);
+                        return `${styledName} (${item.freeCount})`;
+                    })
                     .join(', ');
 
 
@@ -599,7 +659,6 @@
                 row.insertCell().textContent = lesson['課堂'] || '---';
 
                 const freeTeachersCell = row.insertCell();
-                // 使用 innerHTML 渲染帶顏色的教師姓名
                 freeTeachersCell.innerHTML = freeTeachersString || '無其他教師空閒';
             });
             
@@ -615,9 +674,11 @@
             daySelect.addEventListener('change', displaySchedule);
             classSelect.addEventListener('change', displaySchedule);
             
-            // 教師查詢
+            // 教師查詢 (全部新增的輸入欄位都監聽，確保更新)
             daySelect.addEventListener('change', displayTeacherSchedule);
             teacherNameInput.addEventListener('input', displayTeacherSchedule); 
+            priorityTeacherInput.addEventListener('input', displayTeacherSchedule); 
+            dutyTeacherInput.addEventListener('input', displayTeacherSchedule); 
             
             loadDataAndPopulateControls();
         });
