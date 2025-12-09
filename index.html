@@ -103,7 +103,7 @@
 <body>
 
     <h1>班級課堂與教師查詢系統</h1>
-    <p style="color: green;">✅ 正在自動載入 **`班別時間總表.csv`** 和 **`S&PSM_L.csv`** 檔案...</p>
+    <p style="color: green;">✅ 正在自動載入 **`班別時間總表.csv`**、**`S&PSM_L.csv`** 和 **`Teacher List.csv`** 檔案...</p>
 
     <div class="controls">
         <div class="select-group">
@@ -134,11 +134,10 @@
                     <th>時間</th>
                     <th>課堂</th>
                     <th>上課教師</th>
-                    <th>可代課教師</th>
-                </tr>
+                    </tr>
             </thead>
             <tbody id="schedule-body">
-                <tr><td colspan="4" style="text-align: center;">數據載入中，請稍候...</td></tr>
+                <tr><td colspan="3" style="text-align: center;">數據載入中，請稍候...</td></tr>
             </tbody>
         </table>
         <p id="result-message"></p>
@@ -186,11 +185,12 @@
     <script>
         const CSV_FILE_PATH = "班別時間總表.csv"; 
         const GRADE_FILE_PATH = "S&PSM_L.csv"; 
+        const TEACHER_LIST_FILE_PATH = "Teacher List.csv";
 
         let scheduleData = []; 
         let teacherGradesMap = new Map(); 
-        let allTeachersCache = null;
-
+        let teacherListCache = []; 
+        
         // DOM 元素引用
         const daySelect = document.getElementById('day-select');
         const classSelect = document.getElementById('class-select');
@@ -201,17 +201,13 @@
         const teacherScheduleBody = document.getElementById('teacher-schedule-body');
         const teacherResultMessage = document.getElementById('teacher-result-message');
         
-        // New Inputs
         const priorityTeacherInput = document.getElementById('priority-teacher-input');
         const dutyTeacherInput = document.getElementById('duty-teacher-input');
         
         // ====================================================================
-        // 核心輔助功能
+        // 核心輔助功能 (保持不變)
         // ====================================================================
 
-        /**
-         * 將時間字串 (e.g., "08:00-08:15") 轉換為分鐘數，以便比較
-         */
         function timeToMinutes(timeString) {
             if (!timeString || typeof timeString !== 'string') return 0;
             const startTime = timeString.split('-')[0].trim(); 
@@ -223,21 +219,14 @@
             return hours * 60 + minutes;
         }
 
-        /**
-         * 將包含多個教師姓名的字串（用空格、斜線、加號或逗號分隔）分割成陣列
-         */
         function splitTeacherList(teacherString) {
             if (!teacherString) return [];
-            // 匹配空格、逗號、全形逗號、斜線、全形斜線或加號
             return String(teacherString)
                 .split(/[\s,，\/\／+]+/) 
                 .map(name => name.trim()) 
                 .filter(name => name.length > 0);
         }
 
-        /**
-         * 根據教師等級返回帶有顏色的 HTML 標籤 (用於班級課表和查詢標頭)
-         */
         function getStyledTeacherName(teacherName) {
             if (!teacherName || teacherName === '---') return teacherName;
 
@@ -251,25 +240,19 @@
             }
 
             if (colorStyle) {
-                // 使用 innerHTML 進行渲染，必須返回帶 <span> 的 HTML 字串
                 return `<span style="${colorStyle}">${teacherName}</span>`;
             }
             return teacherName;
         }
 
-        /**
-         * 根據教師等級和優先代課狀態返回帶有顏色的 HTML 標籤 (專門用於空閒名單)
-         * 優先級：橙色 > 紅色 (P) / 藍色 (S) > 黑色 (無 Grade)
-         */
         function getFreeListStyledTeacherName(teacherName, isPriority) {
             if (!teacherName || teacherName === '---') return teacherName;
 
-            let color = 'inherit'; // 預設顏色
+            let color = 'inherit'; 
             
             if (isPriority) {
-                color = 'orange'; // 優先顯示橙色
+                color = 'orange'; 
             } else {
-                // 檢查 P/S Grade
                 const grade = teacherGradesMap.get(teacherName);
                 if (grade === 'P') {
                     color = 'red';
@@ -284,34 +267,10 @@
             return teacherName;
         }
 
-
-        /**
-         * 提取所有不重複的教師姓名
-         */
         function getAllTeachers() {
-            if (allTeachersCache) return allTeachersCache;
-
-            const teacherSet = new Set();
-            scheduleData.forEach(item => {
-                // 1. 處理 '上課教師'
-                if (item['上課教師']) {
-                    const teachingNames = splitTeacherList(item['上課教師']);
-                    teachingNames.forEach(name => teacherSet.add(name));
-                }
-                // 2. 處理 '可代課教師'
-                if (item['可代課教師']) {
-                    const subTeachers = splitTeacherList(item['可代課教師']);
-                    subTeachers.forEach(name => teacherSet.add(name));
-                }
-            });
-
-            allTeachersCache = Array.from(teacherSet).filter(name => name !== '---' && name.length > 0);
-            return allTeachersCache;
+            return teacherListCache; 
         }
 
-        /**
-         * 獲取特定日子和時間正在上課的教師名單
-         */
         function getOccupiedTeachers(day, time) {
             const occupiedSet = new Set();
             scheduleData.forEach(item => {
@@ -325,9 +284,6 @@
             return occupiedSet;
         }
 
-        /**
-         * 計算指定日子每位教師的總空閒課堂數
-         */
         function calculateDailyFreeLessons(day) {
             const excludedLessons = ['班主任課', '小息', '午餐'];
             
@@ -339,7 +295,7 @@
                 .map(item => item['時間']))
             ];
 
-            const allTeachers = getAllTeachers();
+            const allTeachers = getAllTeachers(); 
             const freeLessonCountMap = new Map();
 
             allTeachers.forEach(teacher => {
@@ -360,13 +316,43 @@
         }
         
         // ====================================================================
-        // 數據載入與初始化
+        // 數據載入與初始化 (保持不變)
         // ====================================================================
 
         function loadDataAndPopulateControls() {
              resultMessage.textContent = '載入排課表...'; 
              teacherResultMessage.textContent = '載入排課表...';
-            
+            loadTeacherList();
+        }
+
+        function loadTeacherList() {
+            Papa.parse(TEACHER_LIST_FILE_PATH, {
+                download: true,
+                header: false, 
+                skipEmptyLines: true,
+                dynamicTyping: true,
+                complete: function(results) {
+                    if (results.data.length > 0 && results.data[0].length > 0) {
+                        teacherListCache = results.data
+                            .map(row => String(row[0]).trim()) 
+                            .filter(name => name.length > 0 && name !== 'Teacher List'); 
+
+                        teacherResultMessage.textContent = `✅ 教師名單檔案載入成功 (共 ${teacherListCache.length} 位教師)。載入排課表...`;
+                    } else {
+                        teacherResultMessage.textContent = `⚠️ 教師名單檔案載入成功，但內容為空或格式不正確。載入排課表...`;
+                    }
+                    loadScheduleData();
+                },
+                error: function(err) {
+                    console.error("PapaParse Teacher List Error:", err);
+                    teacherResultMessage.textContent = `❌ 載入教師名單檔案失敗。請確認檔案 "${TEACHER_LIST_FILE_PATH}" 存在。載入排課表...`;
+                    loadScheduleData();
+                }
+            });
+        }
+
+
+        function loadScheduleData() {
             Papa.parse(CSV_FILE_PATH, {
                 download: true,         
                 header: true,           
@@ -376,33 +362,44 @@
                     scheduleData = results.data; 
 
                     if (scheduleData.length === 0 || !scheduleData[0]['日子'] || !scheduleData[0]['班別']) {
-                        const errorMsg = "檔案中沒有有效數據，或欄位標題不正確 (應為 '日子', '班別', '時間', '課堂', '上課教師', '可代課教師')。";
+                        const errorMsg = "排課表檔案中沒有有效數據，或欄位標題不正確。";
                         console.error(errorMsg);
                         resultMessage.textContent = `❌ 數據載入失敗：${errorMsg}`;
-                        daySelect.disabled = true;
-                        classSelect.disabled = true;
-                        teacherNameInput.disabled = true; 
-                        priorityTeacherInput.disabled = true; 
-                        dutyTeacherInput.disabled = true; 
+                        disableAllControls();
                         return;
                     }
                     
                     resultMessage.textContent = '載入排課表成功。載入教師等級檔案...'; 
+                    
+                    if (teacherListCache.length === 0) {
+                        teacherListCache = deriveTeachersFromSchedule();
+                        teacherResultMessage.textContent += ` (備用: 從排課表推導出 ${teacherListCache.length} 位教師名單)`;
+                    }
+
                     loadTeacherGrades();
                 },
                 error: function(err) {
                     console.error("PapaParse Schedule Error:", err);
-                    resultMessage.textContent = `❌ 載入檔案失敗。請確認檔案 "${CSV_FILE_PATH}" 存在。`;
+                    resultMessage.textContent = `❌ 載入排課表檔案失敗。請確認檔案 "${CSV_FILE_PATH}" 存在。`;
                     teacherScheduleBody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: red;">排課表檔案載入失敗。</td></tr>`;
-                    daySelect.disabled = true;
-                    classSelect.disabled = true;
-                    teacherNameInput.disabled = true; 
-                    priorityTeacherInput.disabled = true; 
-                    dutyTeacherInput.disabled = true; 
+                    disableAllControls();
                 }
             });
         }
         
+        function deriveTeachersFromSchedule() {
+            const teacherSet = new Set();
+            scheduleData.forEach(item => {
+                if (item['上課教師']) {
+                    splitTeacherList(item['上課教師']).forEach(name => teacherSet.add(name));
+                }
+                if (item['可代課教師']) {
+                    splitTeacherList(item['可代課教師']).forEach(name => teacherSet.add(name));
+                }
+            });
+            return Array.from(teacherSet).filter(name => name !== '---' && name.length > 0);
+        }
+
         function loadTeacherGrades() {
             Papa.parse(GRADE_FILE_PATH, {
                 download: true,
@@ -410,32 +407,35 @@
                 skipEmptyLines: true,
                 dynamicTyping: true,
                 complete: function(gradeResults) {
-                    let success = true;
-                    if (gradeResults.data.length === 0 || !gradeResults.data[0]['教師'] || !gradeResults.data[0]['Grade']) {
-                        teacherResultMessage.textContent = `⚠️ 教師等級檔案載入成功，但內容格式可能不正確。`;
-                        success = false;
-                    } else {
-                         // 填充教師等級 Map
+                    if (gradeResults.data.length > 0 && gradeResults.data[0]['教師'] && gradeResults.data[0]['Grade']) {
                         gradeResults.data.forEach(item => {
                             if (item['教師'] && item['Grade']) {
                                 teacherGradesMap.set(String(item['教師']).trim(), String(item['Grade']).trim());
                             }
                         });
-                        if (success) {
-                            teacherResultMessage.textContent = '✅ 教師等級檔案載入成功。';
-                        }
+                        teacherResultMessage.textContent += ' ✅ 教師等級檔案載入成功。';
+                    } else {
+                        teacherResultMessage.textContent += ` ⚠️ 教師等級檔案載入成功，但內容格式可能不正確。`;
                     }
                     
                     populateControls();
                 },
                 error: function(err) {
                     console.error("PapaParse Grade Error:", err);
-                    teacherResultMessage.textContent = `❌ 載入教師等級檔案失敗。請確認檔案 "${GRADE_FILE_PATH}" 存在。`;
+                    teacherResultMessage.textContent += ` ❌ 載入教師等級檔案失敗。請確認檔案 "${GRADE_FILE_PATH}" 存在。`;
                     populateControls();
                 }
             });
         }
 
+
+        function disableAllControls() {
+            daySelect.disabled = true;
+            classSelect.disabled = true;
+            teacherNameInput.disabled = true; 
+            priorityTeacherInput.disabled = true; 
+            dutyTeacherInput.disabled = true; 
+        }
 
         function populateControls() {
             daySelect.disabled = false;
@@ -444,8 +444,6 @@
             priorityTeacherInput.disabled = false; 
             dutyTeacherInput.disabled = false;
             
-            getAllTeachers(); 
-
             const allDays = [...new Set(scheduleData.map(item => item['日子']).filter(Boolean))];
             const allClasses = [...new Set(scheduleData.map(item => item['班別']).filter(Boolean))];
 
@@ -476,7 +474,7 @@
         }
         
         // ====================================================================
-        // 1. 班級課表查詢 (保持不變)
+        // 1. 班級課表查詢 (已修正：只顯示 3 欄)
         // ====================================================================
 
         function displaySchedule() {
@@ -490,7 +488,8 @@
 
             if (!selectedDay || !selectedClass) {
                 resultMessage.textContent = '請選擇日子和班別以查看課表。';
-                scheduleBody.innerHTML = `<tr><td colspan="4" style="text-align: center;">請選擇日子和班別。</td></tr>`;
+                // 欄位數改為 3
+                scheduleBody.innerHTML = `<tr><td colspan="3" style="text-align: center;">請選擇日子和班別。</td></tr>`;
                 return;
             }
 
@@ -499,7 +498,8 @@
             );
 
             if (filteredSchedule.length === 0) {
-                scheduleBody.innerHTML = `<tr><td colspan="4" style="text-align: center;">在 ${selectedDay}，${selectedClass} 班沒有找到課表數據。</td></tr>`;
+                // 欄位數改為 3
+                scheduleBody.innerHTML = `<tr><td colspan="3" style="text-align: center;">在 ${selectedDay}，${selectedClass} 班沒有找到課表數據。</td></tr>`;
                 resultMessage.textContent = '';
                 return;
             }
@@ -510,24 +510,17 @@
                 const getTime = lesson['時間'] || '---';
                 const getLesson = lesson['課堂'] || '---';
                 const getTeacher = lesson['上課教師'] || '---';
-                const getSubTeachers = lesson['可代課教師'] || '---';
+                // 已刪除 可代課教師 相關變量
 
                 // 處理 上課教師
                 const styledTeachers = splitTeacherList(getTeacher)
                     .map(name => getStyledTeacherName(name))
                     .join(', ');
 
-                // 處理 可代課教師
-                const styledSubTeachers = splitTeacherList(getSubTeachers)
-                    .map(name => getStyledTeacherName(name))
-                    .join(' ');
-
-
+                // 插入 3 個單元格：時間、課堂、上課教師
                 row.insertCell().textContent = getTime;
                 row.insertCell().textContent = getLesson;
-                
                 row.insertCell().innerHTML = styledTeachers || '---'; 
-                row.insertCell().innerHTML = styledSubTeachers || '---';
             });
             
             resultMessage.textContent = `✅ 成功顯示 ${selectedDay}, ${selectedClass} 班的課表 (共 ${filteredSchedule.length} 節)。`;
@@ -535,11 +528,15 @@
 
 
         // ====================================================================
-        // 2. 教師空閒查詢 (已修正：排除查詢教師、加入優先/公務排除)
+        // 2. 教師空閒查詢 (保持不變)
         // ====================================================================
         
         function displayTeacherSchedule() {
-            if (scheduleData.length === 0) return;
+            if (scheduleData.length === 0 || teacherListCache.length === 0) {
+                teacherResultMessage.textContent = '數據載入中，或教師名單為空。';
+                teacherScheduleBody.innerHTML = `<tr><td colspan="4" style="text-align: center;">請等待所有數據載入。</td></tr>`;
+                return;
+            }
 
             const selectedDay = daySelect.value;
             const rawInput = teacherNameInput.value.trim(); 
@@ -567,7 +564,6 @@
             const allTeachers = getAllTeachers(); 
             const dailyFreeLessonsMap = calculateDailyFreeLessons(selectedDay); 
 
-            // 遍歷所有輸入的教師姓名
             teacherNames.forEach(teacherName => {
                 const targetTeacherLessons = scheduleData.filter(item => {
                     if (item['日子'] !== selectedDay) return false;
@@ -591,7 +587,6 @@
             }
             
             let totalLessonsCount = 0;
-            // 渲染合併後的課表
             combinedTeacherLessons.forEach(lesson => {
                 if (lesson.isHeader) {
                     const row = teacherScheduleBody.insertRow();
@@ -610,48 +605,36 @@
                 
                 const occupiedTeachers = getOccupiedTeachers(selectedDay, lessonTime);
                 
-                // 1. 過濾出該時段空閒的教師名單
                 const freeTeachersNames = allTeachers.filter(teacher => 
-                    // 檢查這位老師是否沒有在上課
                     !occupiedTeachers.has(teacher) && 
-                    // 檢查這位老師是否不在輸入的查詢名單中
                     !teacherNames.includes(teacher) &&
-                    // 檢查這位老師是否不在公務名單中 (NEW)
                     !dutyTeachers.has(teacher)
                 );
 
-                // 2. 將姓名與空堂數綁定
                 const freeTeachersWithCount = freeTeachersNames.map(teacher => ({
                     name: teacher,
                     freeCount: dailyFreeLessonsMap.get(teacher) || 0 
                 }));
 
-                // 3. 排序：優先老師 > 空堂數多者 (NEW LOGIC)
                 freeTeachersWithCount.sort((a, b) => {
                     const aIsPriority = priorityTeachers.has(a.name);
                     const bIsPriority = priorityTeachers.has(b.name);
 
-                    // 優先老師排在前面
                     if (aIsPriority && !bIsPriority) return -1;
                     if (!aIsPriority && bIsPriority) return 1;
                     
-                    // 兩者都不是優先老師，或兩者都是，則按空堂數目降序排列
                     return b.freeCount - a.freeCount;
                 });
 
-                // 4. 轉換回字串，使用 getFreeListStyledTeacherName 函數
                 const freeTeachersString = freeTeachersWithCount
                     .map(item => {
-                        // 判斷是否為優先老師
                         const isPriority = priorityTeachers.has(item.name);
-                        // 應用樣式和空堂數
                         const styledName = getFreeListStyledTeacherName(item.name, isPriority);
                         return `${styledName} (${item.freeCount})`;
                     })
                     .join(', ');
 
 
-                // 插入數據
                 row.insertCell().textContent = lessonTime;
                 row.insertCell().textContent = lesson['班別'] || '---';
                 row.insertCell().textContent = lesson['課堂'] || '---';
@@ -668,11 +651,9 @@
         // ====================================================================
 
         document.addEventListener('DOMContentLoaded', () => {
-            // 班級查詢
             daySelect.addEventListener('change', displaySchedule);
             classSelect.addEventListener('change', displaySchedule);
             
-            // 教師查詢 (全部新增的輸入欄位都監聽，確保更新)
             daySelect.addEventListener('change', displayTeacherSchedule);
             teacherNameInput.addEventListener('input', displayTeacherSchedule); 
             priorityTeacherInput.addEventListener('input', displayTeacherSchedule); 
