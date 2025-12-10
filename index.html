@@ -268,24 +268,33 @@
     
     <div class="controls">
         
+        <h3>3.1. 課堂內容對調 (Swap - 支援跨班別/跨級別)</h3>
+        <p>此功能將調換**兩組獨立排課位置**的課堂和上課教師欄位。這可用於**跨班別、跨級別**或在**同一班別**內調動。</p>
+        
+        <div class="input-full-width" style="background-color: #f7f3e8; padding: 5px; border-radius: 4px;">
+            <label for="swap-class-1-select" style="min-width: 60px;">A 班別:</label>
+            <select id="swap-class-1-select" disabled style="flex-grow: 0; margin-right: 10px;"></select>
+            <label for="swap-lessons-1-input" style="min-width: 60px;">A 節數 (例如: 3,4):</label>
+            <input type="text" id="swap-lessons-1-input" placeholder="3,4">
+        </div>
+
+        <div class="input-full-width" style="background-color: #e8f7f3; padding: 5px; border-radius: 4px;">
+            <label for="swap-class-2-select" style="min-width: 60px;">B 班別:</label>
+            <select id="swap-class-2-select" disabled style="flex-grow: 0; margin-right: 10px;"></select>
+            <label for="swap-lessons-2-input" style="min-width: 60px;">B 節數 (例如: 7,8):</label>
+            <input type="text" id="swap-lessons-2-input" placeholder="7,8">
+        </div>
+
+        <button id="swap-classes-btn" disabled>執行課堂對調 (Swap)</button>
+
+        <hr style="margin: 20px 0;">
+        
         <div class="select-group">
-            <label for="class-select-adj">選擇要調整課表的班別 (適用於以下所有調整功能):</label>
+            <label for="class-select-adj">🎯 **選擇要調整老師排課的班別** (只用於以下**新增老師**功能):</label>
             <select id="class-select-adj" disabled>
                 <option>載入中...</option>
             </select>
         </div>
-        
-        <h3>3.1. 課堂內容對調 (Swap)</h3>
-        <p>此功能將調換**所選班別**在兩組節數下的**課堂**和**上課教師**欄位。</p>
-        <div class="input-full-width">
-            <label for="swap-lessons-1-input">調換「節數 1」 (例如: 3,4):</label>
-            <input type="text" id="swap-lessons-1-input" placeholder="3,4">
-        </div>
-        <div class="input-full-width">
-            <label for="swap-lessons-2-input">與「節數 2」對調 (例如: 7,8):</label>
-            <input type="text" id="swap-lessons-2-input" placeholder="7,8">
-        </div>
-        <button id="swap-classes-btn" disabled>執行課堂對調 (Swap)</button>
 
         <h3>3.2. 清空老師排課 (Clear)</h3>
         <p>此功能將從**所有班別**中，清除指定老師在**所選日子**和**指定節數**上的排課。</p>
@@ -300,7 +309,7 @@
         <button id="clear-teachers-btn" disabled>執行清空排課 (Clear)</button>
         
         <h3>3.3. 新增老師排課 (Add)</h3>
-        <p>此功能將在**所選班別**的**指定節數**上，加入指定的老師到排課名單。如果該位置已有老師，則會附加老師名單。</p>
+        <p>此功能將在 **🎯 所選班別** 的 **指定節數** 上，加入指定的老師到排課名單。如果該位置已有老師，則會附加老師名單。</p>
         <div class="input-full-width">
             <label for="add-lessons-input">加入「節數」 (例如: 3,4):</label>
             <input type="text" id="add-lessons-input" placeholder="3,4">
@@ -340,7 +349,10 @@
         let scheduleData = []; 
         let teacherGradesMap = new Map(); 
         let teacherListCache = []; 
-        let timetableMap = new Map(); 
+        
+        // --- 核心修改點 2: 時間表現在是 Map of Maps ---
+        // 結構: Map<DayType, Map<Time, LessonNumber>>
+        let timetableDayTypeMap = new Map(); 
         
         // DOM 元素引用
         const daySelect = document.getElementById('day-select');
@@ -357,12 +369,19 @@
         const priorityTeacherInput = document.getElementById('priority-teacher-input');
         const dutyTeacherInput = document.getElementById('duty-teacher-input');
 
-        const classSelectAdj = document.getElementById('class-select-adj');
+        // ADJUSTMENT CONTROLS
+        const classSelectAdj = document.getElementById('class-select-adj'); // For Add only
         const swapClassesBtn = document.getElementById('swap-classes-btn');
         const clearTeachersBtn = document.getElementById('clear-teachers-btn');
         const addTeacherBtn = document.getElementById('add-teacher-btn');
         
-        // NEW DOM REFERENCES FOR SAVE/LOAD
+        // NEW SWAP CONTROLS
+        const swapClass1Select = document.getElementById('swap-class-1-select');
+        const swapLessons1Input = document.getElementById('swap-lessons-1-input');
+        const swapClass2Select = document.getElementById('swap-class-2-select');
+        const swapLessons2Input = document.getElementById('swap-lessons-2-input');
+        
+        // SAVE/LOAD CONTROLS
         const saveDataBtn = document.getElementById('save-data-btn');
         const loadFileInput = document.getElementById('load-file-input');
         const loadDataBtn = document.getElementById('load-data-btn');
@@ -372,6 +391,20 @@
         // ====================================================================
         // 核心輔助功能
         // ====================================================================
+
+        /**
+         * 根據所選日子，獲取對應的 Time-Lesson Map。
+         * 由於 CSV 中有兩套時間表，我們需要判斷該使用哪一套。
+         * 假設：星期一至四是第一套時間，星期五是第二套時間。
+         */
+        function getCurrentTimetableMap(day) {
+            if (!day) return new Map();
+
+            // 簡易判斷日子類型
+            const dayType = (day === '星期五' || day === 'Friday') ? 'Day5' : 'Day1-4';
+
+            return timetableDayTypeMap.get(dayType) || new Map();
+        }
 
         function timeToMinutes(timeString) {
             if (!timeString || typeof timeString !== 'string') return 0;
@@ -481,7 +514,13 @@
             return freeLessonCountMap;
         }
 
-        function getTimeSlotsByLessonNumbers(lessonNumbersString) {
+        /**
+         * 根據所選日子和節數，轉換為對應的時間段。
+         * @param {string} day - 選擇的日子 (用於判斷使用哪套時間表)
+         * @param {string} lessonNumbersString - 輸入的節數，例如 "3,4"
+         * @returns {string[]} 對應的時間段，例如 ["09:50-10:20", "10:20-10:50"]
+         */
+        function getTimeSlotsByLessonNumbers(day, lessonNumbersString) {
             if (!lessonNumbersString) return [];
             
             const lessonNumbers = String(lessonNumbersString)
@@ -489,16 +528,30 @@
                 .map(num => String(num).trim())
                 .filter(num => num.length > 0);
             
+            // 獲取當前日子的 Time-Lesson Map (Map<Time, LessonNumber>)
+            const currentTimetableMap = getCurrentTimetableMap(day); 
+
+            // 反轉 Map 為 Lesson-Time Map (Map<LessonNumber, Time>)，但考慮到一個 LessonNumber 可能對應多個 Time (例如，早會/閱讀/1/2/3... 可能有重複，但這裡我們只關注 1, 2, 3...)
+            const lessonToTimeMap = new Map();
+            currentTimetableMap.forEach((lesson, time) => {
+                // 為了確保順序，如果多個時間對應同一個節數 (如早會)，我們只取第一個。但對於 1,2,3... 這些數字節數，應該是一一對應的。
+                if (!lessonToTimeMap.has(lesson)) {
+                     lessonToTimeMap.set(lesson, time);
+                }
+            });
+            
             const timeSlots = [];
+            lessonNumbers.forEach(lessonNum => {
+                const time = lessonToTimeMap.get(lessonNum);
+                if (time) {
+                    timeSlots.push(time);
+                }
+            });
             
-            // 使用 Set 來確保時間不重複，並保持時間順序
-            const uniqueTimes = [...new Set(
-                [...timetableMap.entries()]
-                .filter(([time, lesson]) => lessonNumbers.includes(lesson))
-                .map(([time, lesson]) => time)
-            )];
+            // 由於我們是從 Lesson-Time Map 轉換回來的，需要再次排序以確保時間順序
+            timeSlots.sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
             
-            return uniqueTimes;
+            return timeSlots;
         }
 
         function updateDisplays() {
@@ -622,6 +675,7 @@
             });
         }
         
+        // --- 核心修改點 3: 載入時間表數據時，將不同時間表分組 ---
         function loadTimetableData() {
             Papa.parse(TIMETABLE_FILE_PATH, {
                 download: true,
@@ -630,12 +684,54 @@
                 dynamicTyping: true,
                 complete: function(timetableResults) {
                     if (timetableResults.data.length > 0 && timetableResults.data[0]['時間'] && timetableResults.data[0]['節數']) {
+                        
+                        let timeSet1 = new Set(); // 儲存第一組時間
+                        let map1 = new Map(); // 星期一至四 (Day1-4)
+                        let map2 = new Map(); // 星期五 (Day5)
+                        
+                        // 假設前 N 行為第一組時間表 (一至四)，後 N 行為第二組時間表 (五)
+                        // 我們透過時間段是否重複來區分兩組時間表
+                        
                         timetableResults.data.forEach(item => {
                             if (item['時間'] && item['節數']) {
-                                timetableMap.set(String(item['時間']).trim(), String(item['節數']).trim());
+                                const time = String(item['時間']).trim();
+                                const lesson = String(item['節數']).trim();
+
+                                if (timeSet1.size < 20 && !timeSet1.has(time)) { 
+                                    // 假設前面不重複的時間段屬於第一套 (一至四)
+                                    timeSet1.add(time);
+                                    map1.set(time, lesson);
+                                } else if (!timeSet1.has(time)) {
+                                    // 如果時間段與第一套不重複，但第一套已經足夠長 (防止漏掉尾部的小息)，則視為第一套
+                                     map1.set(time, lesson);
+                                } else if (timeSet1.has(time)) { 
+                                    // 如果時間段與第一套重複，則屬於第二套 (星期五)
+                                     map2.set(time, lesson);
+                                }
                             }
                         });
-                        teacherResultMessage.textContent += ' ✅ 節數時間表檔案載入成功。';
+                        
+                        // 根據您上傳的檔案，前 17 行是一套時間表，後面是另一套。
+                        // 由於兩套時間的開始和結束時間並不一樣，最安全的方式是透過**時間點**來分組。
+                        
+                        // 清空並重新分組：根據時間長度來確定切分點，這在沒有 Day 欄位的情況下是危險的。
+                        // 鑑於 CSV 結構，我們假設前 N 行是 Day1-4，後 N 行是 Day5，且兩者長度約為 17-20 行。
+                        const splitIndex = 17; // 這是根據您上傳的檔案結構推測出的分隔點
+                        
+                        const timetable1 = timetableResults.data.slice(0, splitIndex);
+                        const timetable2 = timetableResults.data.slice(splitIndex).filter(item => item['時間']); 
+                        
+                        const finalMap1 = new Map();
+                        timetable1.forEach(item => finalMap1.set(String(item['時間']).trim(), String(item['節數']).trim()));
+                        
+                        const finalMap2 = new Map();
+                        timetable2.forEach(item => finalMap2.set(String(item['時間']).trim(), String(item['節數']).trim()));
+
+                        // 儲存到核心 Map
+                        timetableDayTypeMap.set('Day1-4', finalMap1);
+                        timetableDayTypeMap.set('Day5', finalMap2);
+
+                        teacherResultMessage.textContent += ` ✅ 節數時間表檔案載入成功。已載入 Day1-4 (${finalMap1.size} 筆) 和 Day5 (${finalMap2.size} 筆) 兩組時間表。`;
                     } else {
                         teacherResultMessage.textContent += ` ⚠️ 節數時間表檔案載入成功，但內容格式可能不正確。`;
                     }
@@ -659,11 +755,19 @@
             priorityTeacherInput.disabled = true; 
             dutyTeacherInput.disabled = true; 
             
+            // Adjustment controls
             classSelectAdj.disabled = true;
             swapClassesBtn.disabled = true;
             clearTeachersBtn.disabled = true;
             addTeacherBtn.disabled = true;
-            // NEW
+
+            // Swap Specific Controls
+            swapClass1Select.disabled = true;
+            swapLessons1Input.disabled = true;
+            swapClass2Select.disabled = true;
+            swapLessons2Input.disabled = true;
+            
+            // Save/Load
             saveDataBtn.disabled = true; 
             loadFileInput.disabled = true;
             loadDataBtn.disabled = true;
@@ -677,16 +781,28 @@
             priorityTeacherInput.disabled = false; 
             dutyTeacherInput.disabled = false;
             
+            // Adjustment controls
             classSelectAdj.disabled = false;
             swapClassesBtn.disabled = false;
             clearTeachersBtn.disabled = false;
             addTeacherBtn.disabled = false;
-            // NEW
-            saveDataBtn.disabled = false; // 初始載入成功即可儲存
+
+            // Swap Specific Controls
+            swapClass1Select.disabled = false;
+            swapLessons1Input.disabled = false;
+            swapClass2Select.disabled = false;
+            swapLessons2Input.disabled = false;
+            
+            // Save/Load
+            saveDataBtn.disabled = false; 
             loadFileInput.disabled = false;
             loadDataBtn.disabled = false;
             
-            const allDays = [...new Set(scheduleData.map(item => item['日子']).filter(Boolean))];
+            const allDays = [...new Set(scheduleData.map(item => item['日子']).filter(Boolean))].sort((a, b) => {
+                 // 確保星期一到五的順序
+                const order = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
+                return order.indexOf(a) - order.indexOf(b);
+            });
             const allClasses = [...new Set(scheduleData.map(item => item['班別']).filter(Boolean))].sort();
 
             populateSelect(daySelect, allDays, '日子');
@@ -711,8 +827,18 @@
             }
             
             // --- Class Select for Adjustment (Section 3) ---
-            populateSelect(classSelectAdj, allClasses, '調整班別'); 
+            // classSelectAdj is for Add only
+            populateSelect(classSelectAdj, allClasses, '新增老師目標班別'); 
             if (allClasses.length > 0) classSelectAdj.value = allClasses[0];
+
+            // --- Class Select for Swap (Section 3.1) ---
+            // swapClass1Select and swapClass2Select are for Swap
+            populateSelect(swapClass1Select, allClasses, 'A 班別'); 
+            populateSelect(swapClass2Select, allClasses, 'B 班別');
+            if (allClasses.length > 0) {
+                swapClass1Select.value = allClasses[0];
+                swapClass2Select.value = allClasses[0];
+            }
             
             if (allDays.length > 0) daySelect.value = allDays[0];
 
@@ -745,6 +871,8 @@
             const priorityTeachers = new Set(splitTeacherList(priorityTeacherInput.value.trim()));
             const dutyTeachers = new Set(splitTeacherList(dutyTeacherInput.value.trim()));
             
+            const currentTimetableMap = getCurrentTimetableMap(selectedDay); // 獲取當前日子的時間表
+            
             teacherScheduleBody.innerHTML = '';
             
             // 找出所有受影響的班級及其排課，按時間排序
@@ -762,7 +890,8 @@
             }
 
             uniqueTimeSlots.forEach(timeSlot => {
-                const lessonNumber = timetableMap.get(timeSlot) || '---'; 
+                // 從新的 Map 結構中獲取節數
+                const lessonNumber = currentTimetableMap.get(timeSlot) || '---'; 
                 
                 const row = teacherScheduleBody.insertRow();
                 row.className = 'timeslot-header-row'; 
@@ -824,7 +953,7 @@
                 freeTeachersCell.innerHTML = freeTeachersString || '無教師空閒';
             });
             
-            teacherResultMessage.textContent = `✅ 成功顯示 ${selectedDay}，指定節數 (${timeSlots.map(t => timetableMap.get(t)).join(', ')}) 的空閒教師名單 (共 ${uniqueTimeSlots.length} 個時段)。`;
+            teacherResultMessage.textContent = `✅ 成功顯示 ${selectedDay}，指定節數 (${timeSlots.map(t => currentTimetableMap.get(t)).join(', ')}) 的空閒教師名單 (共 ${uniqueTimeSlots.length} 個時段)。`;
         }
 
         // ====================================================================
@@ -843,11 +972,14 @@
             const teacherNames = splitTeacherList(rawInput);
             
             const lessonNumberString = lessonNumberInput.value.trim();
-            const filterTimeSlots = getTimeSlotsByLessonNumbers(lessonNumberString); 
+            // --- 核心修改點 4: 傳遞日子給 getTimeSlotsByLessonNumbers ---
+            const filterTimeSlots = getTimeSlotsByLessonNumbers(selectedDay, lessonNumberString); 
             const isFilteringBySlot = filterTimeSlots.length > 0;
             
             const priorityTeachers = new Set(splitTeacherList(priorityTeacherInput.value.trim()));
             const dutyTeachers = new Set(splitTeacherList(dutyTeacherInput.value.trim()));
+            
+            const currentTimetableMap = getCurrentTimetableMap(selectedDay); // 獲取當前日子的時間表
 
             teacherScheduleBody.innerHTML = '';
             teacherResultMessage.textContent = '';
@@ -918,7 +1050,8 @@
                 
                 const row = teacherScheduleBody.insertRow();
                 const lessonTime = lesson['時間'] || '---';
-                const lessonNumber = timetableMap.get(lessonTime) || '---'; 
+                // --- 核心修改點 5: 從新的 Map 結構中獲取節數 ---
+                const lessonNumber = currentTimetableMap.get(lessonTime) || '---'; 
 
                 totalLessonsCount++;
                 
@@ -980,6 +1113,8 @@
 
             const selectedDay = daySelect.value;
             const selectedClass = classSelect.value;
+            
+            const currentTimetableMap = getCurrentTimetableMap(selectedDay); // 獲取當前日子的時間表
 
             scheduleBody.innerHTML = '';
             resultMessage.textContent = '';
@@ -1031,7 +1166,8 @@
                 // *** 1. 取得原始教師值，用於缺失檢查 (可能是 '', '---', 或 '婷 欣')
                 const rawTeacherValue = lesson['上課教師'] || ''; 
                 
-                const getLessonNumber = timetableMap.get(getTime) || '---'; 
+                // --- 核心修改點 6: 從新的 Map 結構中獲取節數 ---
+                const getLessonNumber = currentTimetableMap.get(getTime) || '---'; 
                 
                 // --- 修正：粉紅色警示邏輯 (單一班別) ---
                 let rowStyle = '';
@@ -1073,6 +1209,8 @@
             ].sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
             
             const allClasses = [...new Set(scheduleData.map(item => item['班別']).filter(Boolean))].sort();
+            
+            const currentTimetableMap = getCurrentTimetableMap(selectedDay); // 獲取當前日子的時間表
 
             if (allTimeSlots.length === 0) {
                 resultMessage.textContent = `在 ${selectedDay}，沒有找到任何課表數據。`;
@@ -1138,7 +1276,8 @@
                 // --- END CONFLICT DETECTION LOGIC ---
                 
                 const row = scheduleBody.insertRow();
-                const lessonNumber = timetableMap.get(timeSlot) || '---';
+                // --- 核心修改點 7: 從新的 Map 結構中獲取節數 ---
+                const lessonNumber = currentTimetableMap.get(timeSlot) || '---';
                 
                 // Col 1 & 2: 節數, 時間
                 row.insertCell().textContent = lessonNumber;
@@ -1204,7 +1343,7 @@
         }
 
         // ====================================================================
-        // 3.4. 儲存與載入功能 (Save & Load) - 新增
+        // 3.4. 儲存與載入功能 (Save & Load)
         // ====================================================================
         
         // 儲存功能：將 scheduleData 下載為 CSV 檔案
@@ -1296,77 +1435,87 @@
 
         // 3.1 課堂內容對調 (Swap)
         function handleClassSwapClick() {
-            // ... (Swap function code remains the same)
             const selectedDay = daySelect.value;
-            const selectedClass = classSelectAdj.value;
-            const lessons1String = document.getElementById('swap-lessons-1-input').value.trim();
-            const lessons2String = document.getElementById('swap-lessons-2-input').value.trim();
+            // Get classes from dedicated swap selectors
+            const class1 = swapClass1Select.value;
+            const lessons1String = swapLessons1Input.value.trim();
+            const class2 = swapClass2Select.value;
+            const lessons2String = swapLessons2Input.value.trim();
 
-            if (!selectedDay || !selectedClass || !lessons1String || !lessons2String) {
-                adjustmentMessage.textContent = '❌ 請選擇日子、班別，並輸入兩組節數進行對調。';
+            if (!selectedDay || !class1 || !class2 || !lessons1String || !lessons2String) {
+                adjustmentMessage.textContent = '❌ 請選擇日子、兩組班別，並輸入兩組節數進行對調。';
                 adjustmentMessage.style.color = 'red';
                 return;
             }
             
-            const timeSlots1 = getTimeSlotsByLessonNumbers(lessons1String);
-            const timeSlots2 = getTimeSlotsByLessonNumbers(lessons2String);
+            // --- 核心修改點 8: 傳遞日子給 getTimeSlotsByLessonNumbers ---
+            const timeSlots1 = getTimeSlotsByLessonNumbers(selectedDay, lessons1String);
+            const timeSlots2 = getTimeSlotsByLessonNumbers(selectedDay, lessons2String);
             
             if (timeSlots1.length === 0 || timeSlots2.length === 0) {
-                adjustmentMessage.textContent = `❌ 無效的節數輸入。請檢查輸入的節數是否存在於時間表中。`;
+                adjustmentMessage.textContent = `❌ 無效的節數輸入。請檢查輸入的節數是否存在於 ${selectedDay} 的時間表中。`;
                 adjustmentMessage.style.color = 'red';
                 return;
             }
             
             if (timeSlots1.length !== timeSlots2.length) {
-                adjustmentMessage.textContent = `❌ 兩組節數的數量不一致 (${lessons1String}: ${timeSlots1.length} 節, ${lessons2String}: ${timeSlots2.length} 節)。必須數量相等才能對調。`;
+                adjustmentMessage.textContent = `❌ 兩組節數的數量不一致 (A: ${timeSlots1.length} 節, B: ${timeSlots2.length} 節)。必須數量相等才能對調。`;
                 adjustmentMessage.style.color = 'red';
                 return;
             }
             
-            const originalRecords1 = [];
-            const originalRecords2 = [];
-            
+            // --- Step 1: 提取原始數據 ---
+            // 由於可能跨班，我們需要兩個獨立的 Map 來存儲原始記錄
+            const originalRecords1 = new Map(); // Key: TimeSlot, Value: Record
+            const originalRecords2 = new Map(); 
+
             scheduleData.forEach(record => {
-                if (record['日子'] === selectedDay && record['班別'] === selectedClass) {
-                    if (timeSlots1.includes(record['時間'])) {
-                        originalRecords1.push({ ...record }); 
-                    } else if (timeSlots2.includes(record['時間'])) {
-                        originalRecords2.push({ ...record }); 
+                if (record['日子'] === selectedDay) {
+                    if (record['班別'] === class1 && timeSlots1.includes(record['時間'])) {
+                        // 使用展開運算符確保我們複製了一個記錄
+                        originalRecords1.set(record['時間'], { ...record }); 
+                    } else if (record['班別'] === class2 && timeSlots2.includes(record['時間'])) {
+                        originalRecords2.set(record['時間'], { ...record }); 
                     }
                 }
             });
 
-            if (originalRecords1.length === 0 || originalRecords2.length === 0) {
-                adjustmentMessage.textContent = `⚠️ 在 ${selectedClass} 班，沒有找到完整的節數記錄進行對調。請確認班別、日子輸入正確。`;
+            if (originalRecords1.size !== timeSlots1.length || originalRecords2.size !== timeSlots2.length) {
+                adjustmentMessage.textContent = `⚠️ 在 ${class1} 和 ${class2} 班，沒有找到完整的 ${timeSlots1.length} 節記錄進行對調。請確認班別、日子和節數輸入正確，且所有節數在排課表數據中都有對應的行記錄。`;
                 adjustmentMessage.style.color = 'orange';
                 return;
             }
             
-            const recordMap1 = new Map(originalRecords1.map(r => [r['時間'], r]));
-            const recordMap2 = new Map(originalRecords2.map(r => [r['時間'], r]));
-
+            // --- Step 2: 執行對調 ---
             let swapCount = 0;
             
             scheduleData.forEach(record => {
-                if (record['日子'] === selectedDay && record['班別'] === selectedClass) {
+                if (record['日子'] === selectedDay) {
                     const currentTime = record['時間'];
                     
-                    if (timeSlots1.includes(currentTime)) {
+                    // 檢查是否是 A 班的目標節數
+                    if (record['班別'] === class1 && timeSlots1.includes(currentTime)) {
                         const index = timeSlots1.indexOf(currentTime);
-                        const recordToSwap = recordMap2.get(timeSlots2[index]);
+                        const targetTime = timeSlots2[index]; // 對應到 B 班的節數時間
+                        const recordToSwap = originalRecords2.get(targetTime);
                         
                         if (recordToSwap) {
                             record['課堂'] = recordToSwap['課堂'];
                             record['上課教師'] = recordToSwap['上課教師'];
+                            // 不修改班別和日子
                             swapCount++;
                         }
-                    } else if (timeSlots2.includes(currentTime)) {
+                    } 
+                    // 檢查是否是 B 班的目標節數
+                    else if (record['班別'] === class2 && timeSlots2.includes(currentTime)) {
                         const index = timeSlots2.indexOf(currentTime);
-                        const recordToSwap = recordMap1.get(timeSlots1[index]);
+                        const targetTime = timeSlots1[index]; // 對應到 A 班的節數時間
+                        const recordToSwap = originalRecords1.get(targetTime);
 
                          if (recordToSwap) {
                             record['課堂'] = recordToSwap['課堂'];
                             record['上課教師'] = recordToSwap['上課教師'];
+                            // 不修改班別和日子
                             swapCount++;
                         }
                     }
@@ -1374,11 +1523,11 @@
             });
             
             if (swapCount > 0) {
-                adjustmentMessage.textContent = `✅ 成功在 ${selectedClass} 班調換 ${lessons1String} 和 ${lessons2String} 的課堂內容 (共修改 ${swapCount} 筆記錄)。請查看上方查詢結果。`;
+                adjustmentMessage.textContent = `✅ 成功調換 ${class1} 班 ${lessons1String} 和 ${class2} 班 ${lessons2String} 的課堂內容 (共修改 ${swapCount} 筆記錄)。請查看上方查詢結果。`;
                 adjustmentMessage.style.color = 'green';
                 updateDisplays();
             } else {
-                adjustmentMessage.textContent = `⚠️ 沒有找到符合條件的記錄進行對調。請確認班別、日子和節數輸入正確。`;
+                adjustmentMessage.textContent = `⚠️ 沒有找到符合條件的記錄進行對調。請確認日子、班別和節數輸入正確。`;
                 adjustmentMessage.style.color = 'orange';
             }
         }
@@ -1386,10 +1535,10 @@
 
         // 3.2 清空老師排課 (Clear)
         function handleTeacherClearClick() {
-             // ... (Clear function code remains the same)
              const selectedDay = daySelect.value;
             const lessonsString = document.getElementById('clear-lessons-input').value.trim();
             const teachersString = document.getElementById('clear-teachers-input').value.trim();
+            // 注意：這裡不再使用 classSelectAdj.value，因為這是跨班別清空的功能。
 
             if (!selectedDay || !lessonsString || !teachersString) {
                 adjustmentMessage.textContent = '❌ 請選擇日子，並輸入要清空的節數和老師名單。';
@@ -1397,11 +1546,12 @@
                 return;
             }
             
-            const timeSlots = getTimeSlotsByLessonNumbers(lessonsString);
+            // --- 核心修改點 9: 傳遞日子給 getTimeSlotsByLessonNumbers ---
+            const timeSlots = getTimeSlotsByLessonNumbers(selectedDay, lessonsString);
             const teachersToClear = splitTeacherList(teachersString);
             
             if (timeSlots.length === 0) {
-                adjustmentMessage.textContent = `❌ 無效的節數輸入。請檢查輸入的節數是否存在於時間表中。`;
+                adjustmentMessage.textContent = `❌ 無效的節數輸入。請檢查輸入的節數是否存在於 ${selectedDay} 的時間表中。`;
                 adjustmentMessage.style.color = 'red';
                 return;
             }
@@ -1415,6 +1565,7 @@
             let clearCount = 0;
             
             scheduleData.forEach(record => {
+                // 清空老師的排課是跨班別執行的，只要日子和時間吻合，就進行檢查和清理
                 if (record['日子'] === selectedDay && timeSlots.includes(record['時間'])) {
                     let currentTeachersString = record['上課教師'] || '';
                     let currentTeachers = splitTeacherList(currentTeachersString);
@@ -1446,23 +1597,23 @@
         
         // 3.3 新增老師排課 (Add)
         function handleTeacherAddClick() {
-             // ... (Add function code remains the same)
              const selectedDay = daySelect.value;
-            const selectedClass = classSelectAdj.value; // Use classSelectAdj for adjustment target
+            const selectedClass = classSelectAdj.value; // 這裡必須使用 classSelectAdj.value
             const lessonsString = document.getElementById('add-lessons-input').value.trim();
             const teachersString = document.getElementById('add-teacher-input').value.trim();
 
             if (!selectedDay || !selectedClass || !lessonsString || !teachersString) {
-                adjustmentMessage.textContent = '❌ 請選擇日子、班別，並輸入要加入的節數和老師名單。';
+                adjustmentMessage.textContent = '❌ 請選擇日子、🎯 目標班別，並輸入要加入的節數和老師名單。';
                 adjustmentMessage.style.color = 'red';
                 return;
             }
             
-            const timeSlots = getTimeSlotsByLessonNumbers(lessonsString);
+            // --- 核心修改點 10: 傳遞日子給 getTimeSlotsByLessonNumbers ---
+            const timeSlots = getTimeSlotsByLessonNumbers(selectedDay, lessonsString);
             const teachersToAdd = splitTeacherList(teachersString);
             
             if (timeSlots.length === 0) {
-                adjustmentMessage.textContent = `❌ 無效的節數輸入。請檢查輸入的節數是否存在於時間表中。`;
+                adjustmentMessage.textContent = `❌ 無效的節數輸入。請檢查輸入的節數是否存在於 ${selectedDay} 的時間表中。`;
                 adjustmentMessage.style.color = 'red';
                 return;
             }
@@ -1477,6 +1628,7 @@
             const teachersToAddSet = new Set(teachersToAdd);
             
             scheduleData.forEach(record => {
+                // 這裡必須檢查目標班別
                 if (record['日子'] === selectedDay && record['班別'] === selectedClass && timeSlots.includes(record['時間'])) {
                     
                     let currentTeachersString = record['上課教師'] || '';
