@@ -293,13 +293,6 @@
 
         <hr style="margin: 20px 0;">
         
-        <div class="select-group">
-            <label for="class-select-adj">🎯 **選擇要調整老師排課的班別** (只用於以下**新增老師**功能):</label>
-            <select id="class-select-adj" disabled>
-                <option>載入中...</option>
-            </select>
-        </div>
-
         <h3>3.2. 清空老師排課 (Clear)</h3>
         <p>此功能將從**所有班別**中，清除指定老師在**所選日子**和**指定節數**上的排課。</p>
         <div class="input-full-width">
@@ -314,6 +307,14 @@
         
         <h3>3.3. 新增老師排課 (Add)</h3>
         <p>此功能將在 **🎯 所選班別** 的 **指定節數** 上，加入指定的老師到排課名單。如果該位置已有老師，則會附加老師名單。</p>
+        
+        <div class="select-group">
+            <label for="class-select-adj">🎯 **選擇要調整老師排課的班別** (只用於以下**新增老師**功能):</label>
+            <select id="class-select-adj" disabled>
+                <option>載入中...</option>
+            </select>
+        </div>
+        
         <div class="input-full-width">
             <label for="add-lessons-input">加入「節數」 (例如: 3,4):</label>
             <input type="text" id="add-lessons-input" placeholder="3,4">
@@ -540,7 +541,7 @@
                 .filter(item => 
                     item['日子'] === day && 
                     // 排除所有非課堂活動和不應被計為空堂的職務/活動
-                    !lessonsToExcludeFromCount.includes(String(item['課堂']).trim()) 
+                    !lessonsToExcludeFromCount.includes(String(item['課堂'] || '').trim()) 
                 )
                 .map(item => item['時間']))
             ];
@@ -587,8 +588,10 @@
             // 反轉 Map 為 Lesson-Time Map (Map<LessonNumber, Time>)
             const lessonToTimeMap = new Map();
             currentTimetableMap.forEach((lesson, time) => {
-                if (!lessonToTimeMap.has(lesson)) {
-                     lessonToTimeMap.set(lesson, time);
+                // 如果 lesson 是 '早會' 或 '閱讀' 等活動名稱，也嘗試將其視為一個「節數」處理
+                const lessonKey = String(lesson).trim();
+                if (!lessonToTimeMap.has(lessonKey)) {
+                     lessonToTimeMap.set(lessonKey, time);
                 }
             });
             
@@ -632,7 +635,7 @@
                 complete: function(results) {
                     if (results.data.length > 0 && results.data[0].length > 0) {
                         teacherListCache = results.data
-                            .map(row => String(row[0]).trim()) 
+                            .map(row => String(row[0] || '').trim()) 
                             .filter(name => name.length > 0 && name !== 'Teacher List'); 
 
                         teacherResultMessage.textContent = `✅ 教師名單檔案載入成功 (共 ${teacherListCache.length} 位教師)。載入排課表...`;
@@ -741,11 +744,13 @@
                     if (timetableResults.data.length > 0 && timetableResults.data[0]['時間'] && timetableResults.data[0]['節數']) {
                         
                         // 根據 CSV 結構推測的分隔點
-                        const splitIndex = 17; 
+                        const splitIndex = timetableResults.data.findIndex(item => item['時間'] && item['時間'].includes('08:00') && item['節數'] === '班主任課');
                         
-                        const timetable1 = timetableResults.data.slice(0, splitIndex);
-                        // Filter out records where '時間' is missing, which might occur if the file has trailing empty rows
-                        const timetable2 = timetableResults.data.slice(splitIndex).filter(item => item['時間']); 
+                        // 使用 0-16 作為 Day1-4 (假設檔案結構不變，這是原始 Day1-4 的數據範圍)
+                        const defaultSplitIndex = 17; 
+
+                        const timetable1 = timetableResults.data.slice(0, defaultSplitIndex);
+                        const timetable2 = timetableResults.data.slice(defaultSplitIndex).filter(item => item['時間']); 
                         
                         const finalMap1 = new Map();
                         timetable1.forEach(item => finalMap1.set(String(item['時間']).trim(), String(item['節數']).trim()));
@@ -1022,7 +1027,7 @@
             const rawInput = teacherNameInput.value.trim(); 
             const teacherNames = splitTeacherList(rawInput);
             
-            const lessonNumberString = lessonNumberInput.value.trim();
+            const lessonNumberString = lessonNumberInput.value.trim(); 
             // 傳遞日子給 getTimeSlotsByLessonNumbers
             const filterTimeSlots = getTimeSlotsByLessonNumbers(selectedDay, lessonNumberString); 
             const isFilteringBySlot = filterTimeSlots.length > 0;
@@ -1210,7 +1215,7 @@
 
             const filteredSchedule = scheduleData.filter(item => 
                 item['日子'] === selectedDay && item['班別'] === selectedClass
-            );
+            ).sort((a, b) => timeToMinutes(a['時間']) - timeToMinutes(b['時間'])); // 確保排序
 
             if (filteredSchedule.length === 0) {
                 resultMessage.textContent = `在 ${selectedDay}，${selectedClass} 班沒有找到課表數據。`;
@@ -1232,8 +1237,7 @@
                 
                 // --- 修正：粉紅色警示邏輯 (單一班別) ---
                 let rowStyle = '';
-                // 檢查是否為非常規活動 (NON_LESSON_ACTIVITIES 不包含 早會/班主任課/閱讀)
-                // 只有在 NON_LESSON_ACTIVITIES 內，才算「非課堂」
+                // 檢查是否為只顯示活動名稱的項目
                 const isLesson = !NON_LESSON_ACTIVITIES.includes(getLesson);
                 
                 // 檢查教師是否缺失：只要 splitTeacherList 結果為空，就視為缺失
@@ -1269,7 +1273,7 @@
             resultMessage.textContent = `✅ 成功顯示 ${selectedDay}, ${selectedClass} 班的課表 (共 ${filteredSchedule.length} 節)。`;
         }
         
-        // 函數：顯示自訂多班別的合併課表 (NEW FUNCTION)
+        // 函數：顯示自訂多班別的合併課表
         function displayCustomMultiClassesSchedule(selectedDay, customClasses) {
              if (customClasses.length === 0) {
                 resultMessage.textContent = '請在上方輸入框輸入要顯示的班別 (例如: 1A 1B 2C)。';
@@ -1982,10 +1986,9 @@
         });
         
         // ********************************************************************
-        // NOTE: displayAllClassesSchedule function is included for completeness
+        // 函數：顯示所有班別的合併課表 (與 displayCustomMultiClassesSchedule 共用邏輯)
         // ********************************************************************
         
-        // 函數：顯示所有班別的合併課表 (與 displayCustomMultiClassesSchedule 共用邏輯)
         function displayAllClassesSchedule(selectedDay) {
             
             const allTimeSlots = [...new Set(scheduleData
