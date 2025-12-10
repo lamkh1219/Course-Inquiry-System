@@ -189,7 +189,7 @@
     
     <hr>
     <h2>1. 教師空閒查詢 (Teacher Free Time Lookup)</h2>
-    <p>ℹ️ **P Grade**/<span style="color: red; font-weight: bold;">紅色</span>，**S Grade**/<span style="color: blue; font-weight: bold;">藍色</span>。優先代課老師以 <span style="color: orange; font-weight: bold;">橙色</span> 顯示並排最前。可單獨輸入**節數**查詢該時段所有空閒教師。</p>
+    <p>ℹ️ **P Grade**/<span style="color: red; font-weight: bold;">紅色</span>，**S Grade**/<span style="color: blue; font-weight: bold;">藍色</span>。優先代課老師以 <span style="color: orange; font-weight: bold;">橙色</span> 顯示並排最前。**早會、班主任課、閱讀、小息、午膳、午間活動和週會／課間活動** 不納入空堂數計算。可單獨輸入**節數**查詢該時段所有空閒教師。</p>
     
     <div class="controls">
         <div class="input-full-width">
@@ -234,7 +234,7 @@
     
     <hr>
     <h2>2. 班級課表查詢 (Class Schedule Lookup)</h2>
-    <p>ℹ️ **P Grade** 教師以 <span style="color: red; font-weight: bold;">紅色</span> 顯示，**S Grade** 教師以 <span style="color: blue; font-weight: bold;">藍色</span> 顯示。**沒有教師的常規/指定課堂** 將以 <span style="background-color: #ffc2c2; font-weight: bold;">粉紅色底色</span> 顯示。**如果同一教師在同一節數出現在兩班以上課堂**，將以 <span style="background-color: #FFC299; color: #333; font-weight: bold;">粉橙色底色</span> 顯示 (僅在「所有班別」視圖)。</p>
+    <p>ℹ️ **P Grade** 教師以 <span style="color: red; font-weight: bold;">紅色</span> 顯示，**S Grade** 教師以 <span style="color: blue; font-weight: bold;">藍色</span> 顯示。**沒有教師的常規/指定課堂** 將以 <span style="background-color: #ffc2c2; font-weight: bold;">粉紅色底色</span> 顯示。**如果同一教師在同一節數出現在兩班以上課堂**，將以 <span style="background-color: #FFC299; color: #333; font-weight: bold;">粉橙色底色</span> 顯示 (在「所有班別」或「自訂多班別」視圖)。</p>
     
     <div class="controls">
         <div class="select-group">
@@ -242,6 +242,10 @@
             <select id="class-select" disabled>
                 <option>載入中...</option>
             </select>
+        </div>
+        <div class="input-full-width" id="multi-class-input-group" style="display: none; margin-top: 10px;">
+            <label for="multi-class-input" style="color: #2980b9;">輸入要顯示的班別 (例如: 1A 1B 2C) :</label>
+            <input type="text" id="multi-class-input" placeholder="例如: 1A 1B 2C">
         </div>
     </div>
 
@@ -344,14 +348,19 @@
         const TEACHER_LIST_FILE_PATH = "Teacher List.csv";
         const TIMETABLE_FILE_PATH = "時間表.csv"; 
         
-        // 核心修改點 1: 只將非教學、不需要老師的活動列入排除列表
+        // --- 核心修改點 1: 更新排除列表 ---
+        // 1. 活動名稱只顯示，不顯示教師 (用於 displaySchedule)
         const NON_LESSON_ACTIVITIES = ['小息', '午膳', '午間活動', '週會／課間活動'];
-
+        
+        // 2. 活動不納入空堂計算 (用於 calculateDailyFreeLessons)
+        // 包含所有 NON_LESSON_ACTIVITIES，以及需要老師但不能代課的職務/活動
+        const NON_COUNTABLE_FOR_FREE_LESSONS = [...NON_LESSON_ACTIVITIES, '早會', '班主任課', '閱讀'];
+        // --- 核心修改點 1 結束 ---
+        
         let scheduleData = []; 
         let teacherGradesMap = new Map(); 
         let teacherListCache = []; 
         
-        // --- 核心修改點: 新增用於追蹤原始數據的 Map ---
         // Key: '日子|班別|時間', Value: {課堂: string, 上課教師: string}
         let originalScheduleDataMap = new Map(); 
 
@@ -364,6 +373,10 @@
         const scheduleHeader = document.getElementById('schedule-header'); 
         const scheduleBody = document.getElementById('schedule-body');
         const resultMessage = document.getElementById('result-message');
+        
+        // NEW CUSTOM MULTI-CLASS ELEMENTS
+        const multiClassInputGroup = document.getElementById('multi-class-input-group');
+        const multiClassInput = document.getElementById('multi-class-input');
         
         const teacherNameInput = document.getElementById('teacher-name-input');
         const lessonNumberInput = document.getElementById('lesson-number-input'); 
@@ -517,13 +530,17 @@
             return occupiedSet;
         }
 
+        // --- 核心修改點 2: 更改空堂計算邏輯 ---
         function calculateDailyFreeLessons(day) {
-            const excludedLessons = NON_LESSON_ACTIVITIES;
+            // 使用新的、更全面的排除列表，包含早會、班主任課、閱讀
+            const lessonsToExcludeFromCount = NON_COUNTABLE_FOR_FREE_LESSONS; 
             
+            // 篩選出所有在該日子的時間段中，課堂名稱「不」屬於排除列表的唯一時間段。
             const relevantUniqueTimeSlots = [...new Set(scheduleData
                 .filter(item => 
                     item['日子'] === day && 
-                    !excludedLessons.includes(String(item['課堂']).trim())
+                    // 排除所有非課堂活動和不應被計為空堂的職務/活動
+                    !lessonsToExcludeFromCount.includes(String(item['課堂']).trim()) 
                 )
                 .map(item => item['時間']))
             ];
@@ -547,6 +564,8 @@
 
             return freeLessonCountMap;
         }
+        // --- 核心修改點 2 結束 ---
+
 
         /**
          * 根據所選日子和節數，轉換為對應的時間段。
@@ -784,7 +803,7 @@
             daySelect.disabled = false;
             classSelect.disabled = false;
             teacherNameInput.disabled = false;
-            lessonNumberInput.disabled = false; 
+            lessonNumberInput.disabled = false;
             priorityTeacherInput.disabled = false; 
             dutyTeacherInput.disabled = false;
             
@@ -817,11 +836,19 @@
             // --- Class Select (Section 2) ---
             classSelect.innerHTML = ''; 
             
+            // 1. ALL option
             const allOption = document.createElement('option');
             allOption.value = 'ALL';
             allOption.textContent = '--- 所有班別 (All Classes) ---';
             classSelect.appendChild(allOption);
+            
+            // 2. NEW Custom Multi-Class option
+            const customOption = document.createElement('option');
+            customOption.value = 'CUSTOM_MULTI';
+            customOption.textContent = '--- 自訂多班別 (Custom Multi-Class) ---';
+            classSelect.appendChild(customOption);
 
+            // 3. Individual Class options
             allClasses.forEach(option => {
                 const opt = document.createElement('option');
                 opt.value = option;
@@ -831,6 +858,8 @@
 
             if (allClasses.length > 0) {
                  classSelect.value = 'ALL'; 
+                 // Ensure the multi-class input is hidden initially
+                 multiClassInputGroup.style.display = 'none';
             }
             
             // --- Class Select for Adjustment (Section 3) ---
@@ -867,6 +896,21 @@
                 opt.textContent = option;
                 selectElement.appendChild(opt);
             });
+        }
+
+        // ====================================================================
+        // NEW EVENT HANDLER FOR CLASS SELECT
+        // ====================================================================
+        function handleClassSelectChange() {
+            const selectedClass = classSelect.value;
+            if (selectedClass === 'CUSTOM_MULTI') {
+                // Display the custom input field
+                multiClassInputGroup.style.display = 'flex'; 
+            } else {
+                // Hide the custom input field
+                multiClassInputGroup.style.display = 'none'; 
+            }
+            displaySchedule(); // Update the display based on selection
         }
 
         // ====================================================================
@@ -1013,6 +1057,7 @@
             // Proceed with Teacher-based query (Case 1 or 3)
             let combinedTeacherLessons = [];
             const allTeachers = getAllTeachers(); 
+            // 空堂計算將使用新的排除列表
             const dailyFreeLessonsMap = calculateDailyFreeLessons(selectedDay); 
 
             teacherNames.forEach(teacherName => {
@@ -1142,6 +1187,15 @@
                 return;
             }
             
+            // --- NEW 邏輯: 顯示自訂多班別 ---
+            if (selectedClass === 'CUSTOM_MULTI') {
+                const customClassesString = multiClassInput.value.trim();
+                // Reuse splitTeacherList for class names parsing
+                const customClasses = splitTeacherList(customClassesString); 
+                displayCustomMultiClassesSchedule(selectedDay, customClasses);
+                return;
+            }
+            
             // --- 邏輯: 顯示單一班別 ---
             
             if (!selectedClass) {
@@ -1178,12 +1232,14 @@
                 
                 // --- 修正：粉紅色警示邏輯 (單一班別) ---
                 let rowStyle = '';
-                // 檢查是否為非常規活動 (現在只有 '小息', '午膳', '午間活動', '週會／課間活動' 是排除項)
+                // 檢查是否為非常規活動 (NON_LESSON_ACTIVITIES 不包含 早會/班主任課/閱讀)
+                // 只有在 NON_LESSON_ACTIVITIES 內，才算「非課堂」
                 const isLesson = !NON_LESSON_ACTIVITIES.includes(getLesson);
                 
                 // 檢查教師是否缺失：只要 splitTeacherList 結果為空，就視為缺失
                 const isTeacherMissing = splitTeacherList(rawTeacherValue).length === 0;
 
+                // 只要是「課堂」或「指定職務活動」(早會/班主任課/閱讀)，且教師缺失，就顯示粉紅色
                 if (isLesson && isTeacherMissing) {
                     rowStyle = 'background-color: #ffc2c2;'; // 粉紅色底色
                 }
@@ -1197,52 +1253,66 @@
                     .map(name => getStyledTeacherName(name))
                     .join(', ');
 
-
                 row.insertCell().textContent = getLessonNumber; 
                 row.insertCell().textContent = getTime;
                 row.insertCell().textContent = getLesson;
-                row.insertCell().innerHTML = styledTeachers || '---'; 
+                
+                // 檢查是否為只顯示課堂名稱的活動 (NON_LESSON_ACTIVITIES)
+                if (NON_LESSON_ACTIVITIES.includes(getLesson)) {
+                    row.insertCell().textContent = '---'; // 這些活動不顯示教師名單
+                } else {
+                    // 其他所有活動 (包括 早會/班主任課/閱讀 和常規課堂) 均顯示教師名單
+                    row.insertCell().innerHTML = styledTeachers || '---'; 
+                }
             });
             
             resultMessage.textContent = `✅ 成功顯示 ${selectedDay}, ${selectedClass} 班的課表 (共 ${filteredSchedule.length} 節)。`;
         }
-
-        // 函數：顯示所有班別的合併課表
-        function displayAllClassesSchedule(selectedDay) {
+        
+        // 函數：顯示自訂多班別的合併課表 (NEW FUNCTION)
+        function displayCustomMultiClassesSchedule(selectedDay, customClasses) {
+             if (customClasses.length === 0) {
+                resultMessage.textContent = '請在上方輸入框輸入要顯示的班別 (例如: 1A 1B 2C)。';
+                scheduleHeader.innerHTML = '<tr><th>節數</th><th>時間</th><th>(請輸入班別)</th></tr>'; 
+                scheduleBody.innerHTML = `<tr><td colspan="3" style="text-align: center;">請在上方輸入框輸入班別。</td></tr>`;
+                return;
+            }
             
             const allTimeSlots = [...new Set(scheduleData
                 .filter(item => item['日子'] === selectedDay && item['時間'])
                 .map(item => item['時間']))
             ].sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
             
-            const allClasses = [...new Set(scheduleData.map(item => item['班別']).filter(Boolean))].sort();
+            // 確保只顯示用戶指定的，且實際存在於數據中的班別
+            const existingClasses = [...new Set(scheduleData.map(item => item['班別']).filter(Boolean))];
+            const targetClasses = customClasses.filter(c => existingClasses.includes(c)).sort();
             
             const currentTimetableMap = getCurrentTimetableMap(selectedDay); // 獲取當前日子的時間表
 
-            if (allTimeSlots.length === 0) {
-                resultMessage.textContent = `在 ${selectedDay}，沒有找到任何課表數據。`;
+            if (targetClasses.length === 0) {
+                resultMessage.textContent = `❌ 輸入的班別 ${customClasses.join('、')} 均無數據或格式錯誤。`;
                 scheduleHeader.innerHTML = '<tr><th>節數</th><th>時間</th><th>(無班別數據)</th></tr>'; 
-                scheduleBody.innerHTML = `<tr><td colspan="${allClasses.length + 2}" style="text-align: center;">沒有數據。</td></tr>`;
+                scheduleBody.innerHTML = `<tr><td colspan="${customClasses.length + 2}" style="text-align: center;">輸入的班別沒有找到對應數據。</td></tr>`;
                 return;
             }
             
             // 2. 彙整數據: { time: { class: {課堂, 上課教師} } }
             const aggregatedData = new Map();
             scheduleData.forEach(item => {
-                if (item['日子'] === selectedDay && item['班別']) { 
+                if (item['日子'] === selectedDay && targetClasses.includes(item['班別'])) { 
                     if (!aggregatedData.has(item['時間'])) {
                         aggregatedData.set(item['時間'], new Map());
                     }
                     aggregatedData.get(item['時間']).set(item['班別'], {
                         lesson: item['課堂'] || '---',
-                        teacher: item['上課教師'] || '' // 使用空字串 '' 以便於判斷缺失
+                        teacher: item['上課教師'] || '' 
                     });
                 }
             });
 
-            // 3. 生成表頭
+            // 3. 生成表頭 - 只包含 targetClasses
             let headerHtml = '<tr><th>節數</th><th>時間</th>';
-            allClasses.forEach(className => {
+            targetClasses.forEach(className => {
                 headerHtml += `<th>${className}</th>`;
             });
             headerHtml += '</tr>';
@@ -1253,23 +1323,28 @@
             
             allTimeSlots.forEach(timeSlot => {
                 
-                // --- CONFLICT DETECTION LOGIC ---
+                // --- CONFLICT DETECTION LOGIC (Only for targetClasses) ---
                 const teachingTeachers = new Map(); // Map<TeacherName, Set<ClassName>>
                 const classDataMap = aggregatedData.get(timeSlot) || new Map();
                 
-                allClasses.forEach(className => {
+                targetClasses.forEach(className => {
                     const classLesson = classDataMap.get(className);
                     if (classLesson) {
                         const rawTeacher = String(classLesson.teacher).trim();
                         const teachers = splitTeacherList(rawTeacher);
-                        teachers.forEach(teacher => {
-                            if (teacher.length > 0 && teacher !== '---') { 
-                                if (!teachingTeachers.has(teacher)) {
-                                    teachingTeachers.set(teacher, new Set());
+                        
+                        // 確保只有非休息活動才檢查教師衝突
+                        const lesson = String(classLesson.lesson).trim();
+                        if (!NON_LESSON_ACTIVITIES.includes(lesson)) {
+                            teachers.forEach(teacher => {
+                                if (teacher.length > 0 && teacher !== '---') { 
+                                    if (!teachingTeachers.has(teacher)) {
+                                        teachingTeachers.set(teacher, new Set());
+                                    }
+                                    teachingTeachers.get(teacher).add(className);
                                 }
-                                teachingTeachers.get(teacher).add(className);
-                            }
-                        });
+                            });
+                        }
                     }
                 });
 
@@ -1291,7 +1366,7 @@
                 row.insertCell().textContent = timeSlot;
                 
                 
-                allClasses.forEach(className => {
+                targetClasses.forEach(className => {
                     const cell = row.insertCell();
                     const classLesson = classDataMap.get(className);
                     
@@ -1310,7 +1385,7 @@
                             cellStyle = 'background-color: #FFC299;'; // 粉橙色底色 (Light Salmon/Pinkish Orange)
                         } else {
                             // --- 其次檢查：粉紅色警示邏輯 (教師缺失) ---
-                            // 檢查是否為非常規活動 (現在只有 小息/午膳 等是排除項)
+                            // 檢查是否為只顯示活動名稱的項目
                             const isLesson = !NON_LESSON_ACTIVITIES.includes(lesson);
                             // 檢查教師是否缺失
                             const isTeacherMissing = teachers.length === 0;
@@ -1341,6 +1416,141 @@
                         }
                     } else {
                         // 該班別在該時間段沒有數據
+                        cell.textContent = '---';
+                    }
+                });
+            });
+
+            resultMessage.textContent = `✅ 成功顯示 ${selectedDay}，自訂 ${targetClasses.length} 個班別的合併課表 (${targetClasses.join('、')}) (共 ${allTimeSlots.length} 個時間段)。`;
+        }
+
+        // 函數：顯示所有班別的合併課表
+        function displayAllClassesSchedule(selectedDay) {
+            
+            const allTimeSlots = [...new Set(scheduleData
+                .filter(item => item['日子'] === selectedDay && item['時間'])
+                .map(item => item['時間']))
+            ].sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+            
+            const allClasses = [...new Set(scheduleData.map(item => item['班別']).filter(Boolean))].sort();
+            
+            const currentTimetableMap = getCurrentTimetableMap(selectedDay); 
+
+            if (allTimeSlots.length === 0) {
+                resultMessage.textContent = `在 ${selectedDay}，沒有找到任何課表數據。`;
+                scheduleHeader.innerHTML = '<tr><th>節數</th><th>時間</th><th>(無班別數據)</th></tr>'; 
+                scheduleBody.innerHTML = `<tr><td colspan="${allClasses.length + 2}" style="text-align: center;">沒有數據。</td></tr>`;
+                return;
+            }
+            
+            // 2. 彙整數據: { time: { class: {課堂, 上課教師} } }
+            const aggregatedData = new Map();
+            scheduleData.forEach(item => {
+                if (item['日子'] === selectedDay && item['班別']) { 
+                    if (!aggregatedData.has(item['時間'])) {
+                        aggregatedData.set(item['時間'], new Map());
+                    }
+                    aggregatedData.get(item['時間']).set(item['班別'], {
+                        lesson: item['課堂'] || '---',
+                        teacher: item['上課教師'] || '' 
+                    });
+                }
+            });
+
+            // 3. 生成表頭
+            let headerHtml = '<tr><th>節數</th><th>時間</th>';
+            allClasses.forEach(className => {
+                headerHtml += `<th>${className}</th>`;
+            });
+            headerHtml += '</tr>';
+            scheduleHeader.innerHTML = headerHtml; 
+            
+            // 4. 生成表格內容
+            scheduleBody.innerHTML = '';
+            
+            allTimeSlots.forEach(timeSlot => {
+                
+                // --- CONFLICT DETECTION LOGIC ---
+                const teachingTeachers = new Map(); // Map<TeacherName, Set<ClassName>>
+                const classDataMap = aggregatedData.get(timeSlot) || new Map();
+                
+                allClasses.forEach(className => {
+                    const classLesson = classDataMap.get(className);
+                    if (classLesson) {
+                        const rawTeacher = String(classLesson.teacher).trim();
+                        const teachers = splitTeacherList(rawTeacher);
+                        
+                        const lesson = String(classLesson.lesson).trim();
+                        if (!NON_LESSON_ACTIVITIES.includes(lesson)) {
+                            teachers.forEach(teacher => {
+                                if (teacher.length > 0 && teacher !== '---') { 
+                                    if (!teachingTeachers.has(teacher)) {
+                                        teachingTeachers.set(teacher, new Set());
+                                    }
+                                    teachingTeachers.get(teacher).add(className);
+                                }
+                            });
+                        }
+                    }
+                });
+
+                const conflictedTeachers = new Set();
+                teachingTeachers.forEach((classesSet, teacher) => {
+                    if (classesSet.size >= 2) { 
+                        conflictedTeachers.add(teacher);
+                    }
+                });
+                // --- END CONFLICT DETECTION LOGIC ---
+                
+                const row = scheduleBody.insertRow();
+                const lessonNumber = currentTimetableMap.get(timeSlot) || '---';
+                
+                // Col 1 & 2: 節數, 時間
+                row.insertCell().textContent = lessonNumber;
+                row.insertCell().textContent = timeSlot;
+                
+                
+                allClasses.forEach(className => {
+                    const cell = row.insertCell();
+                    const classLesson = classDataMap.get(className);
+                    
+                    if (classLesson) {
+                        const lesson = String(classLesson.lesson).trim();
+                        const rawTeacher = String(classLesson.teacher).trim();
+                        const teachers = splitTeacherList(rawTeacher); 
+                        
+                        let cellStyle = '';
+                        
+                        const hasConflict = teachers.some(teacher => conflictedTeachers.has(teacher));
+                        
+                        if (hasConflict) {
+                            cellStyle = 'background-color: #FFC299;'; 
+                        } else {
+                            // 檢查是否為只顯示活動名稱的項目
+                            const isLesson = !NON_LESSON_ACTIVITIES.includes(lesson);
+                            const isTeacherMissing = teachers.length === 0;
+
+                            if (isLesson && isTeacherMissing) {
+                                cellStyle = 'background-color: #ffc2c2;'; 
+                            }
+                        }
+                        cell.style.cssText = cellStyle;
+                        
+                        
+                        if (NON_LESSON_ACTIVITIES.includes(lesson)) {
+                            cell.textContent = lesson; 
+                        } else if (lesson === '---' && rawTeacher === '') {
+                            cell.textContent = '---';
+                        } else {
+                            // 包括 早會/班主任課/閱讀 在內的所有活動均使用此格式
+                            const displayTeacherValue = rawTeacher || '---';
+                            const styledTeachers = splitTeacherList(displayTeacherValue)
+                                .map(name => getStyledTeacherName(name))
+                                .join(' / '); 
+                                
+                            cell.innerHTML = `${lesson} - ${styledTeachers}`;
+                        }
+                    } else {
                         cell.textContent = '---';
                     }
                 });
@@ -1749,7 +1959,11 @@
         document.addEventListener('DOMContentLoaded', () => {
             // 查詢功能監聽
             daySelect.addEventListener('change', updateDisplays);
-            classSelect.addEventListener('change', displaySchedule); 
+            // Modified listener for class select
+            classSelect.addEventListener('change', handleClassSelectChange); 
+            // New listener for custom multi-class input
+            multiClassInput.addEventListener('input', displaySchedule);
+            
             teacherNameInput.addEventListener('input', displayTeacherSchedule); 
             lessonNumberInput.addEventListener('input', displayTeacherSchedule); 
             priorityTeacherInput.addEventListener('input', displayTeacherSchedule); 
@@ -1766,6 +1980,146 @@
             
             loadDataAndPopulateControls();
         });
+        
+        // ********************************************************************
+        // NOTE: displayAllClassesSchedule function is included for completeness
+        // ********************************************************************
+        
+        // 函數：顯示所有班別的合併課表 (與 displayCustomMultiClassesSchedule 共用邏輯)
+        function displayAllClassesSchedule(selectedDay) {
+            
+            const allTimeSlots = [...new Set(scheduleData
+                .filter(item => item['日子'] === selectedDay && item['時間'])
+                .map(item => item['時間']))
+            ].sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
+            
+            const allClasses = [...new Set(scheduleData.map(item => item['班別']).filter(Boolean))].sort();
+            
+            const currentTimetableMap = getCurrentTimetableMap(selectedDay); 
+
+            if (allTimeSlots.length === 0) {
+                resultMessage.textContent = `在 ${selectedDay}，沒有找到任何課表數據。`;
+                scheduleHeader.innerHTML = '<tr><th>節數</th><th>時間</th><th>(無班別數據)</th></tr>'; 
+                scheduleBody.innerHTML = `<tr><td colspan="${allClasses.length + 2}" style="text-align: center;">沒有數據。</td></tr>`;
+                return;
+            }
+            
+            // 2. 彙整數據: { time: { class: {課堂, 上課教師} } }
+            const aggregatedData = new Map();
+            scheduleData.forEach(item => {
+                if (item['日子'] === selectedDay && item['班別']) { 
+                    if (!aggregatedData.has(item['時間'])) {
+                        aggregatedData.set(item['時間'], new Map());
+                    }
+                    aggregatedData.get(item['時間']).set(item['班別'], {
+                        lesson: item['課堂'] || '---',
+                        teacher: item['上課教師'] || '' 
+                    });
+                }
+            });
+
+            // 3. 生成表頭
+            let headerHtml = '<tr><th>節數</th><th>時間</th>';
+            allClasses.forEach(className => {
+                headerHtml += `<th>${className}</th>`;
+            });
+            headerHtml += '</tr>';
+            scheduleHeader.innerHTML = headerHtml; 
+            
+            // 4. 生成表格內容
+            scheduleBody.innerHTML = '';
+            
+            allTimeSlots.forEach(timeSlot => {
+                
+                // --- CONFLICT DETECTION LOGIC ---
+                const teachingTeachers = new Map(); 
+                const classDataMap = aggregatedData.get(timeSlot) || new Map();
+                
+                allClasses.forEach(className => {
+                    const classLesson = classDataMap.get(className);
+                    if (classLesson) {
+                        const rawTeacher = String(classLesson.teacher).trim();
+                        const teachers = splitTeacherList(rawTeacher);
+                        
+                        const lesson = String(classLesson.lesson).trim();
+                        // 只檢查非休息活動的教師衝突
+                        if (!NON_LESSON_ACTIVITIES.includes(lesson)) {
+                            teachers.forEach(teacher => {
+                                if (teacher.length > 0 && teacher !== '---') { 
+                                    if (!teachingTeachers.has(teacher)) {
+                                        teachingTeachers.set(teacher, new Set());
+                                    }
+                                    teachingTeachers.get(teacher).add(className);
+                                }
+                            });
+                        }
+                    }
+                });
+
+                const conflictedTeachers = new Set();
+                teachingTeachers.forEach((classesSet, teacher) => {
+                    if (classesSet.size >= 2) { 
+                        conflictedTeachers.add(teacher);
+                    }
+                });
+                // --- END CONFLICT DETECTION LOGIC ---
+                
+                const row = scheduleBody.insertRow();
+                const lessonNumber = currentTimetableMap.get(timeSlot) || '---';
+                
+                // Col 1 & 2: 節數, 時間
+                row.insertCell().textContent = lessonNumber;
+                row.insertCell().textContent = timeSlot;
+                
+                
+                allClasses.forEach(className => {
+                    const cell = row.insertCell();
+                    const classLesson = classDataMap.get(className);
+                    
+                    if (classLesson) {
+                        const lesson = String(classLesson.lesson).trim();
+                        const rawTeacher = String(classLesson.teacher).trim();
+                        const teachers = splitTeacherList(rawTeacher); 
+                        
+                        let cellStyle = '';
+                        
+                        const hasConflict = teachers.some(teacher => conflictedTeachers.has(teacher));
+                        
+                        if (hasConflict) {
+                            cellStyle = 'background-color: #FFC299;'; 
+                        } else {
+                            // 檢查是否為只顯示活動名稱的項目
+                            const isLesson = !NON_LESSON_ACTIVITIES.includes(lesson);
+                            const isTeacherMissing = teachers.length === 0;
+
+                            if (isLesson && isTeacherMissing) {
+                                cellStyle = 'background-color: #ffc2c2;'; 
+                            }
+                        }
+                        cell.style.cssText = cellStyle;
+                        
+                        
+                        if (NON_LESSON_ACTIVITIES.includes(lesson)) {
+                            cell.textContent = lesson; 
+                        } else if (lesson === '---' && rawTeacher === '') {
+                            cell.textContent = '---';
+                        } else {
+                            // 包括 早會/班主任課/閱讀 在內的所有活動均使用此格式
+                            const displayTeacherValue = rawTeacher || '---';
+                            const styledTeachers = splitTeacherList(displayTeacherValue)
+                                .map(name => getStyledTeacherName(name))
+                                .join(' / '); 
+                                
+                            cell.innerHTML = `${lesson} - ${styledTeachers}`;
+                        }
+                    } else {
+                        cell.textContent = '---';
+                    }
+                });
+            });
+
+            resultMessage.textContent = `✅ 成功顯示 ${selectedDay}，所有 ${allClasses.length} 個班別的合併課表 (共 ${allTimeSlots.length} 個時間段)。`;
+        }
 
     </script>
 
