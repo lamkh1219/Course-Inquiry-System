@@ -1287,10 +1287,28 @@
                 .map(item => item['時間']))
             ].sort((a, b) => timeToMinutes(a) - timeToMinutes(b));
             
-            // 確保只顯示用戶指定的，且實際存在於數據中的班別
-            const existingClasses = [...new Set(scheduleData.map(item => item['班別']).filter(Boolean))];
-            const targetClasses = customClasses.filter(c => existingClasses.includes(c)).sort();
+            // --- START: NEW CASE-INSENSITIVE CLASS FILTERING LOGIC ---
+            // 1. 建立現有班別的正規化對照表 (Key: UPPERCASE, Value: Original Case)
+            const classMap = new Map();
+            [...new Set(scheduleData.map(item => item['班別']).filter(Boolean))].forEach(className => {
+                // 使用數據中的原始班別名稱作為 Value
+                classMap.set(String(className).trim().toUpperCase(), String(className).trim()); 
+            });
+
+            // 2. 篩選出符合用戶輸入（不區分大小寫）的班別，並使用原始班別名稱
+            const targetClassesSet = new Set();
+            customClasses.forEach(inputClass => {
+                const normalizedInput = String(inputClass).trim().toUpperCase();
+                if (classMap.has(normalizedInput)) {
+                    // 使用數據中的原始班別名稱 (例如: 1A, 而非 1a)
+                    targetClassesSet.add(classMap.get(normalizedInput)); 
+                }
+            });
             
+            // 3. 排序最終目標班別列表
+            const targetClasses = Array.from(targetClassesSet).sort();
+            // --- END: NEW CASE-INSENSITIVE CLASS FILTERING LOGIC ---
+
             const currentTimetableMap = getCurrentTimetableMap(selectedDay); // 獲取當前日子的時間表
 
             if (targetClasses.length === 0) {
@@ -1300,7 +1318,7 @@
                 return;
             }
             
-            // 2. 彙整數據: { time: { class: {課堂, 上課教師} } }
+            // 4. 彙整數據: { time: { class: {課堂, 上課教師} } }
             const aggregatedData = new Map();
             scheduleData.forEach(item => {
                 if (item['日子'] === selectedDay && targetClasses.includes(item['班別'])) { 
@@ -1314,7 +1332,7 @@
                 }
             });
 
-            // 3. 生成表頭 - 只包含 targetClasses
+            // 5. 生成表頭 - 只包含 targetClasses
             let headerHtml = '<tr><th>節數</th><th>時間</th>';
             targetClasses.forEach(className => {
                 headerHtml += `<th>${className}</th>`;
@@ -1322,7 +1340,7 @@
             headerHtml += '</tr>';
             scheduleHeader.innerHTML = headerHtml; 
             
-            // 4. 生成表格內容
+            // 6. 生成表格內容
             scheduleBody.innerHTML = '';
             
             allTimeSlots.forEach(timeSlot => {
