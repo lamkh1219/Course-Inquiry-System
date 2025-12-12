@@ -107,6 +107,14 @@
         #generate-report-btn:hover:not(:disabled) {
             background-color: #c0392b;
         }
+        /* NEW: Reset Data Button Style */
+        #reset-data-btn {
+            background-color: #9b59b6; /* 紫色 */
+            margin-top: 0; /* 讓它與 Select 在同一行對齊 */
+        }
+        #reset-data-btn:hover:not(:disabled) {
+            background-color: #8e44ad;
+        }
         
         table {
             width: 100%;
@@ -199,6 +207,7 @@
             <select id="day-select" disabled>
                 <option>載入中...</option>
             </select>
+            <button id="reset-data-btn" disabled>🔄 清除所有更改 (還原)</button>
         </div>
     </div>
     
@@ -289,7 +298,7 @@
 
     <hr>
     <h2>3. 調堂功能 (Class/Teacher Assignment Adjustment)</h2>
-    <p style="color: orange;">⚠️ 注意：以下操作將修改當前網頁的排課資料。每次切換日子時，所有未儲存的調課將自動清除並還原。請務必使用下方的「儲存」功能來下載已調整的數據。</p>
+    <p style="color: orange;">⚠️ 注意：以下操作將修改當前網頁的排課資料。請務必使用下方的「儲存」功能來下載已調整的數據。</p>
     <div class="controls">
         
         <h3>3.1. 課堂內容對調 (Swap - 支援跨班別/跨級別)</h3>
@@ -397,7 +406,7 @@
         let teacherListCache = []; 
         
         // Key: '日子|班別|時間', Value: {課堂: string, 上課教師: string}
-        // MODIFIED: This map now ONLY stores the data from the initial load of 班別時間總表.csv
+        // This map ONLY stores the data from the initial load of 班別時間總表.csv
         // It is the immutable baseline for all reset/reporting operations.
         let originalScheduleDataMap = new Map(); 
 
@@ -422,6 +431,9 @@
         
         const priorityTeacherInput = document.getElementById('priority-teacher-input');
         const dutyTeacherInput = document.getElementById('duty-teacher-input');
+        
+        // NEW RESET BUTTON
+        const resetDataBtn = document.getElementById('reset-data-btn');
 
         // ADJUSTMENT CONTROLS
         const classSelectClear = document.getElementById('class-select-clear'); // NEW: For Clear only
@@ -484,7 +496,7 @@
         }
         
         /**
-         * [NEW FUNCTION] 將所有已修改的排課數據還原到初始載入的狀態。
+         * [MODIFIED FUNCTION] 將所有已修改的排課數據還原到初始載入的狀態。
          */
         function resetModifiedDataToOriginal() {
             let resetCount = 0;
@@ -515,11 +527,15 @@
             
             // 更新提示訊息
             if (resetCount > 0) {
-                adjustmentMessage.textContent = `⚠️ 已自動清除所有未儲存的調課內容 (共 ${resetCount} 筆記錄)，並還原至原始排課表。`;
-                adjustmentMessage.style.color = 'orange';
+                adjustmentMessage.textContent = `✅ 已手動清除所有未儲存的調課內容 (共 ${resetCount} 筆記錄)，並還原至原始排課表。`;
+                adjustmentMessage.style.color = 'green';
             } else {
-                adjustmentMessage.textContent = ''; // 清除之前的消息
+                adjustmentMessage.textContent = `⚠️ 沒有偵測到任何更改，無需清除。`; // 清除之前的消息
+                adjustmentMessage.style.color = 'orange';
             }
+            
+            // 刷新顯示
+            updateDisplays();
         }
 
 
@@ -695,6 +711,7 @@
             // 在數據更新後，確保儲存按鈕可用
             saveDataBtn.disabled = false; 
             generateReportBtn.disabled = false; // MODIFIED: Enable Report CSV button
+            resetDataBtn.disabled = false; // Enable Reset button
         }
         
         // ====================================================================
@@ -883,6 +900,7 @@
             loadFileInput.disabled = true;
             loadDataBtn.disabled = true;
             generateReportBtn.disabled = true; // MODIFIED: Disable Report CSV button
+            resetDataBtn.disabled = true; // NEW: Disable Reset button
         }
 
         function populateControls() {
@@ -911,6 +929,7 @@
             loadFileInput.disabled = false;
             loadDataBtn.disabled = false;
             generateReportBtn.disabled = false; // MODIFIED: Enable Report CSV button
+            resetDataBtn.disabled = false; // NEW: Enable Reset button
             
             const allDays = [...new Set(scheduleData.map(item => item['日子']).filter(Boolean))].sort((a, b) => {
                  // 確保星期一到五的順序
@@ -2128,11 +2147,15 @@
         document.addEventListener('DOMContentLoaded', () => {
             // 查詢功能監聽
             
-            // --- 核心修改點：日子切換時先重置數據 ---
+            // --- MODIFIED: 日子切換時不再自動清除 ---
             daySelect.addEventListener('change', () => {
-                resetModifiedDataToOriginal(); 
+                // resetModifiedDataToOriginal(); // <--- REMOVED
                 updateDisplays(); 
             });
+            // ------------------------------------
+            
+            // --- NEW: 手動清除按鈕監聽 ---
+            resetDataBtn.addEventListener('click', resetModifiedDataToOriginal);
             // ------------------------------------
             
             classSelect.addEventListener('change', handleClassSelectChange); 
