@@ -1935,7 +1935,7 @@
         // --- END MODIFIED: Save function ---
 
 
-        // MODIFIED: CSV Report Generation Function
+        // MODIFIED: CSV Report Generation Function - ADDING BOM
         function handleGenerateReportCSVClick() {
             if (scheduleData.length === 0) {
                 adjustmentMessage.textContent = '❌ 無數據可生成報告。請先確認排課表已成功載入。';
@@ -1954,17 +1954,25 @@
             
             try {
                 // PapaParse 自動處理標頭和 CSV 格式
-                const csv = Papa.unparse(modifiedRecordsWithOriginal, {
+                const csvContent = Papa.unparse(modifiedRecordsWithOriginal, {
                     // 確保欄位順序符合預期
                     columns: ['日子', '班別', '節數', '時間', '課堂_原', '課堂_新', '教師_原', '教師_新', '修改類型'],
                     // 允許使用中文標頭
                     header: true
                 });
                 
+                // --- CORE MODIFICATION: Add BOM to the start of the CSV content ---
+                // UTF-8 BOM bytes: 0xEF, 0xBB, 0xBF
+                const BOM = "\uFEFF"; 
+                const finalCsv = BOM + csvContent; 
+                // --- END CORE MODIFICATION ---
+
+                
                 const currentDate = new Date().toISOString().slice(0, 10);
                 const filename = `排課調動報告_完整變更清單_${currentDate}.csv`; // Report remains .csv
                 
-                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                // 使用 finalCsv 創建 Blob
+                const blob = new Blob([finalCsv], { type: 'text/csv;charset=utf-8;' });
                 
                 const link = document.createElement('a');
                 if (link.download !== undefined) { 
@@ -1976,7 +1984,7 @@
                     link.click();
                     document.body.removeChild(link);
                     
-                    adjustmentMessage.textContent = `✅ 成功下載 ${modifiedRecordsWithOriginal.length} 筆已變更的排課報告 (含新舊值) 為檔案：${filename}。`;
+                    adjustmentMessage.textContent = `✅ 成功下載 ${modifiedRecordsWithOriginal.length} 筆已變更的排課報告 (含新舊值) 為檔案：${filename}。報告已添加 BOM 標記以兼容 Excel。`;
                     adjustmentMessage.style.color = 'green';
                 } else {
                     adjustmentMessage.textContent = '⚠️ 您的瀏覽器不完全支援自動下載，請複製以下數據。';
