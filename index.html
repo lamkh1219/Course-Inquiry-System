@@ -174,6 +174,11 @@
             background-color: #FFC299;
             color: #333; 
         }
+        /* NEW: 已修改記錄的粉紫色 */
+        p > span[style*="background-color: #E6E6FA"] { 
+            background-color: #E6E6FA;
+            color: #333; 
+        }
         
         /* 讓課表中的可點擊單元格有手型游標提示 */
         #schedule-body td {
@@ -263,6 +268,7 @@
     <h2>2. 班級課表查詢 (Class Schedule Lookup)</h2>
     <p>
         ℹ️ <span style="color: blue; font-weight: bold;">SPSM</span>/<span style="color: blue; font-weight: bold;">藍色</span>，<span style="color: red; font-weight: bold;">PSM</span>/<span style="color: red; font-weight: bold;">紅色</span>
+        <br>ℹ️ **有更改的課堂**將以 <span style="background-color: #E6E6FA; font-weight: bold;">粉紫色底色</span> 顯示。
         <br>ℹ️ 沒有教師的課堂將以 <span style="background-color: #ffc2c2; font-weight: bold;">粉紅色底色</span> 顯示，如果同一教師在同一節數出現在兩班以上課堂將以 <span style="background-color: #FFC299; color: #333; font-weight: bold;">橙色底色</span> 顯示
         <br>💡 點擊課表中的任何單元格，可將該課堂的班別、節數和上課教師自動填入下方的 3.2及 3.3 的輸入框中。
     </p>
@@ -369,9 +375,9 @@
     <h2>4. 儲存與載入功能 (Save & Load)</h2>
     <div class="controls">
         <p>
-            💡下載 按鈕只會儲存與載入時的數據有差異的記錄 (只包含新值)。
-            <br>💡報告 按鈕將下載包含所有**原有**和**修改後**紀錄的 CSV 報告。
-            <br>💡載入 按鈕只會更新與上傳檔案吻合的記錄，如果上傳檔案只包含單一日子，會自動切換顯示。
+            💡下載 按鈕只會儲存與載入時的數據有差異的記錄 (只包含新值)。**檔案副檔名為 .csav**。
+            <br>💡報告 按鈕將下載包含所有**原有**和**修改後**紀錄的 CSV 報告 (.csv)。
+            <br>💡載入 按鈕只會更新與上傳檔案 (.csv 或 .csav) 吻合的記錄，如果上傳檔案只包含單一日子，會自動切換顯示。
         </p>
         <div class="select-group button-row">
             <button id="save-data-btn" disabled>📥 下載已調整排課表 (Save Modified Only)</button>
@@ -379,8 +385,8 @@
         </div>
         
         <div class="input-full-width" style="margin-top: 20px;">
-            <label for="load-file-input">上傳調整過的排課表 CSV 檔案 (Load):</label>
-            <input type="file" id="load-file-input" accept=".csv" disabled>
+            <label for="load-file-input">上傳調整過的排課表 CSV / CSAV 檔案 (Load):</label>
+            <input type="file" id="load-file-input" accept=".csv, .csav" disabled> 
             <button id="load-data-btn" disabled style="background-color: #3498db; margin-left: 10px;">⬆️ 載入排課表 (Update Existing)</button>
         </div>
     </div>
@@ -705,6 +711,136 @@
             return timeSlots;
         }
 
+        /**
+         * NEW: 檢查給定的記錄是否已從原始數據修改 (課堂或教師)。
+         * @param {object} currentRecord - 當前的排課記錄。
+         * @returns {boolean} 如果已修改則返回 true。
+         */
+        function isRecordModified(currentRecord) {
+            const key = generateRecordKey(currentRecord);
+            const originalRecord = originalScheduleDataMap.get(key);
+            
+            if (!originalRecord) return false; 
+            
+            const currentLesson = String(currentRecord['課堂'] || '').trim();
+            const originalLesson = originalRecord['課堂']; 
+            
+            const currentTeacher = String(currentRecord['上課教師'] || '').trim();
+            const originalTeacher = originalRecord['上課教師']; 
+            
+            const isLessonModified = currentLesson !== originalLesson;
+            const isTeacherModified = currentTeacher !== originalTeacher;
+            
+            // 只要課堂或教師其中一個與原始值不同，即視為已修改
+            return isLessonModified || isTeacherModified;
+        }
+        
+        // ====================================================================
+        // NEW: 輔助功能 - 獲取自動顯示的班別 (Modified + Conflicted)
+        // ====================================================================
+        /**
+         * 獲取所有已修改或存在衝突的班別列表。
+         * 衝突包括：缺少老師 (粉紅色) 或 教師衝突 (橙色)。
+         * @param {string} selectedDay - 選擇的日子。
+         * @returns {string[]} 唯一且排序後的班別名稱列表。
+         */
+        function getAutoClasses(selectedDay) {
+            const autoClassesSet = new Set();
+            
+            // 獲取該日子所有的班別
+            const allClasses = [...new Set(scheduleData.filter(item => item['日子'] === selectedDay).map(item => item['班別']).filter(Boolean))].sort();
+
+            // 1. --- Modified Check (已修改) ---
+            scheduleData.forEach(currentRecord => {
+                if (currentRecord['日子'] !== selectedDay) return;
+
+                if (isRecordModified(currentRecord)) {
+                    autoClassesSet.add(currentRecord['班別']);
+                }
+            });
+
+            // 2. --- Conflict Check (缺少老師 / 教師衝突) ---
+            
+            // 獲取該日子所有非重複的時間段
+            const allTimeSlots = [...new Set(scheduleData
+                .filter(item => item['日子'] === selectedDay && item['時間'])
+                .map(item => item['時間']))
+            ];
+            
+            // Group data by time slot and class
+            const aggregatedData = new Map();
+            scheduleData.forEach(item => {
+                if (item['日子'] === selectedDay) {
+                    if (!aggregatedData.has(item['時間'])) {
+                        aggregatedData.set(item['時間'], new Map());
+                    }
+                    aggregatedData.get(item['時間']).set(item['班別'], {
+                        lesson: String(item['課堂'] || '---').trim(),
+                        teacher: String(item['上課教師'] || '').trim()
+                    });
+                }
+            });
+            
+            allTimeSlots.forEach(timeSlot => {
+                const teachingTeachers = new Map(); // Map<TeacherName, Set<ClassName>>
+                const classDataMap = aggregatedData.get(timeSlot) || new Map();
+                
+                // 1. First Pass: Detect all teachers teaching in this slot and check for missing teachers
+                allClasses.forEach(className => {
+                    const classLesson = classDataMap.get(className);
+                    if (classLesson) {
+                        const lesson = classLesson.lesson;
+                        const rawTeacher = classLesson.teacher;
+                        const teachers = splitTeacherList(rawTeacher);
+                        
+                        const isLesson = !NON_LESSON_ACTIVITIES.includes(lesson);
+
+                        // Check for Missing Teacher (Pink Background)
+                        if (isLesson && teachers.length === 0) {
+                            autoClassesSet.add(className);
+                        }
+
+                        // Collect teaching info for conflict check
+                        if (isLesson) {
+                            teachers.forEach(teacher => {
+                                if (teacher.length > 0 && teacher !== '---') { 
+                                    if (!teachingTeachers.has(teacher)) {
+                                        teachingTeachers.set(teacher, new Set());
+                                    }
+                                    teachingTeachers.get(teacher).add(className);
+                                }
+                            });
+                        }
+                    }
+                });
+
+                // 2. Second Pass: Check for Multi-Class Conflict (Orange/Yellow Background)
+                const conflictedTeachers = new Set();
+                teachingTeachers.forEach((classesSet, teacher) => {
+                    if (classesSet.size >= 2) { 
+                        conflictedTeachers.add(teacher);
+                    }
+                });
+                
+                if (conflictedTeachers.size > 0) {
+                    // Find which classes are involved in this conflict
+                    allClasses.forEach(className => {
+                        const classLesson = classDataMap.get(className);
+                        if (classLesson) {
+                             const rawTeacher = classLesson.teacher;
+                             const teachers = splitTeacherList(rawTeacher);
+                             const hasConflict = teachers.some(teacher => conflictedTeachers.has(teacher));
+                             if (hasConflict) {
+                                  autoClassesSet.add(className);
+                             }
+                        }
+                    });
+                }
+            });
+
+            return Array.from(autoClassesSet).sort();
+        }
+        
         function updateDisplays() {
             displaySchedule();
             displayTeacherSchedule();
@@ -943,6 +1079,12 @@
             // --- Class Select (Section 2) ---
             classSelect.innerHTML = ''; 
             
+            // 0. NEW: Auto Class option
+            const autoOption = document.createElement('option');
+            autoOption.value = 'AUTO_CONFLICTS';
+            autoOption.textContent = '--- 自動顯示有更改/衝突的班別 (Auto) ---';
+            classSelect.appendChild(autoOption);
+
             // 1. ALL option
             const allOption = document.createElement('option');
             allOption.value = 'ALL';
@@ -964,7 +1106,7 @@
             });
 
             if (allClasses.length > 0) {
-                 classSelect.value = 'ALL'; 
+                 classSelect.value = 'AUTO_CONFLICTS'; // NEW Default: Auto
                  // Ensure the multi-class input is hidden initially
                  multiClassInputGroup.style.display = 'none';
             }
@@ -1060,8 +1202,8 @@
                 return;
             }
 
-            if (selectedClassMode === 'ALL' || selectedClassMode === 'CUSTOM_MULTI') {
-                // Multi-Class or All-Class View
+            if (selectedClassMode === 'ALL' || selectedClassMode === 'CUSTOM_MULTI' || selectedClassMode === 'AUTO_CONFLICTS') {
+                // Multi-Class or All-Class View or Auto View
                 lessonNumber = row.cells[0].textContent.trim();
                 
                 const headerRow = scheduleHeader.querySelector('tr');
@@ -1365,7 +1507,7 @@
         }
 
         // ====================================================================
-        // 2. 班級課表查詢 (略)
+        // 2. 班級課表查詢
         // ====================================================================
 
         function displaySchedule() {
@@ -1373,11 +1515,6 @@
 
             const selectedDay = daySelect.value;
             const selectedClass = classSelect.value;
-            
-            const currentTimetableMap = getCurrentTimetableMap(selectedDay); // 獲取當前日子的時間表
-
-            scheduleBody.innerHTML = '';
-            resultMessage.textContent = '';
             
             const singleClassHeader = '<tr><th>節數</th><th>時間</th><th>課堂</th><th>上課教師</th></tr>';
 
@@ -1388,6 +1525,11 @@
                 return;
             }
 
+            if (selectedClass === 'AUTO_CONFLICTS') {
+                displayAutoClassesSchedule(selectedDay);
+                return;
+            }
+            
             if (selectedClass === 'ALL') {
                 displayAllClassesSchedule(selectedDay);
                 return;
@@ -1400,18 +1542,23 @@
                 return;
             }
             
-            if (!selectedClass) {
+            // ADDED: The default option for the select is an empty string, handle it.
+            if (!selectedClass || selectedClass.startsWith('---')) {
                 resultMessage.textContent = '請選擇班別以查看課表。';
                 scheduleHeader.innerHTML = singleClassHeader;
                 scheduleBody.innerHTML = `<tr><td colspan="4" style="text-align: center;">請選擇班別。</td></tr>`; 
                 return;
             }
             
+            // Single Class View Logic
+            const currentTimetableMap = getCurrentTimetableMap(selectedDay);
             scheduleHeader.innerHTML = singleClassHeader;
 
             const filteredSchedule = scheduleData.filter(item => 
                 item['日子'] === selectedDay && item['班別'] === selectedClass
             ).sort((a, b) => timeToMinutes(a['時間']) - timeToMinutes(b['時間'])); 
+
+            scheduleBody.innerHTML = ''; // Clear previous results
 
             if (filteredSchedule.length === 0) {
                 resultMessage.textContent = `在 ${selectedDay}，${selectedClass} 班沒有找到課表數據。`;
@@ -1431,16 +1578,25 @@
                 
                 let rowStyle = '';
                 const isLesson = !NON_LESSON_ACTIVITIES.includes(getLesson);
-                const isTeacherMissing = splitTeacherList(rawTeacherValue).length === 0;
+                const teachersList = splitTeacherList(rawTeacherValue);
+                const isTeacherMissing = teachersList.length === 0;
+                
+                // NEW: Check for modification
+                const isModified = isRecordModified(lesson);
 
+                // Priority 1: Missing Teacher (Pink)
                 if (isLesson && isTeacherMissing) {
                     rowStyle = 'background-color: #ffc2c2;'; // 粉紅色底色
+                } 
+                // Priority 2: Modified (Pink-Purple/Lavender) - ONLY if no Pink background is applied.
+                else if (isModified) {
+                     rowStyle = 'background-color: #E6E6FA;'; // 粉紫色底色
                 }
                 
                 row.style.cssText = rowStyle;
                 
                 const displayTeacherValue = rawTeacherValue || '---';
-                const styledTeachers = splitTeacherList(displayTeacherValue)
+                const styledTeachers = teachersList
                     .map(name => getStyledTeacherName(name))
                     .join(', ');
 
@@ -1458,6 +1614,33 @@
             resultMessage.textContent = `✅ 成功顯示 ${selectedDay}, ${selectedClass} 班的課表 (共 ${filteredSchedule.length} 節)。`;
         }
         
+        /**
+         * NEW: 自動顯示有更改/衝突的班別的課表。
+         * @param {string} selectedDay - 選擇的日子。
+         */
+        function displayAutoClassesSchedule(selectedDay) {
+            const autoClasses = getAutoClasses(selectedDay);
+
+            if (autoClasses.length === 0) {
+                resultMessage.textContent = `✅ 在 ${selectedDay}，沒有偵測到任何更改或排課衝突的班別。`;
+                scheduleHeader.innerHTML = '<tr><th>節數</th><th>時間</th><th>(無班別需要關注)</th></tr>'; 
+                scheduleBody.innerHTML = `<tr><td colspan="3" style="text-align: center;">沒有任何班別需要自動顯示。</td></tr>`;
+                return;
+            }
+            
+            // 呼叫現有的多班別顯示邏輯
+            displayCustomMultiClassesSchedule(selectedDay, autoClasses);
+            
+            // 覆寫結果訊息
+            const allTimeSlots = [...new Set(scheduleData
+                .filter(item => item['日子'] === selectedDay && item['時間'])
+                .map(item => item['時間']))
+            ];
+            
+            resultMessage.textContent = `✅ 成功自動顯示 ${selectedDay}，共 ${autoClasses.length} 個有更改/衝突的班別 (${autoClasses.join('、')}) (共 ${allTimeSlots.length} 個時間段)。`;
+        }
+
+
         function displayCustomMultiClassesSchedule(selectedDay, customClasses) {
              if (customClasses.length === 0) {
                 resultMessage.textContent = '請在上方輸入框輸入要顯示的班別 (例如: 1A 1B 2C)。';
@@ -1479,6 +1662,7 @@
             const targetClassesSet = new Set();
             customClasses.forEach(inputClass => {
                 const normalizedInput = String(inputClass).trim().toUpperCase();
+                // 這裡必須確認該班別在原始數據中是存在的
                 if (classMap.has(normalizedInput)) {
                     targetClassesSet.add(classMap.get(normalizedInput)); 
                 }
@@ -1502,8 +1686,10 @@
                         aggregatedData.set(item['時間'], new Map());
                     }
                     aggregatedData.get(item['時間']).set(item['班別'], {
-                        lesson: item['課堂'] || '---',
-                        teacher: item['上課教師'] || '' 
+                        lesson: String(item['課堂'] || '---').trim(),
+                        teacher: String(item['上課教師'] || '').trim(),
+                        // NEW: Pass the full record for modification check
+                        record: item 
                     });
                 }
             });
@@ -1525,10 +1711,10 @@
                 targetClasses.forEach(className => {
                     const classLesson = classDataMap.get(className);
                     if (classLesson) {
-                        const rawTeacher = String(classLesson.teacher).trim();
+                        const rawTeacher = classLesson.teacher;
                         const teachers = splitTeacherList(rawTeacher);
                         
-                        const lesson = String(classLesson.lesson).trim();
+                        const lesson = classLesson.lesson;
                         if (!NON_LESSON_ACTIVITIES.includes(lesson)) {
                             teachers.forEach(teacher => {
                                 if (teacher.length > 0 && teacher !== '---') { 
@@ -1561,24 +1747,34 @@
                     const classLesson = classDataMap.get(className);
                     
                     if (classLesson) {
-                        const lesson = String(classLesson.lesson).trim();
-                        const rawTeacher = String(classLesson.teacher).trim();
+                        const lesson = classLesson.lesson;
+                        const rawTeacher = classLesson.teacher;
                         const teachers = splitTeacherList(rawTeacher); 
                         
                         let cellStyle = '';
                         
                         const hasConflict = teachers.some(teacher => conflictedTeachers.has(teacher));
                         
+                        const isLesson = !NON_LESSON_ACTIVITIES.includes(lesson);
+                        const isTeacherMissing = teachers.length === 0;
+                        
+                        // NEW: Check for modification using the stored record reference
+                        const isModified = isRecordModified(classLesson.record);
+
+
+                        // Priority 1: Teacher Conflict (Orange)
                         if (hasConflict) {
                             cellStyle = 'background-color: #FFC299;'; 
-                        } else {
-                            const isLesson = !NON_LESSON_ACTIVITIES.includes(lesson);
-                            const isTeacherMissing = teachers.length === 0;
-
-                            if (isLesson && isTeacherMissing) {
-                                cellStyle = 'background-color: #ffc2c2;'; 
-                            }
+                        } 
+                        // Priority 2: Missing Teacher (Pink)
+                        else if (isLesson && isTeacherMissing) {
+                            cellStyle = 'background-color: #ffc2c2;'; 
                         }
+                        // Priority 3: Modified (Pink-Purple/Lavender)
+                        else if (isModified) {
+                             cellStyle = 'background-color: #E6E6FA;'; 
+                        }
+
                         cell.style.cssText = cellStyle;
                         
                         
@@ -1600,7 +1796,11 @@
                 });
             });
 
-            resultMessage.textContent = `✅ 成功顯示 ${selectedDay}，自訂 ${targetClasses.length} 個班別的合併課表 (${targetClasses.join('、')}) (共 ${allTimeSlots.length} 個時間段)。`;
+            let message = `✅ 成功顯示 ${selectedDay}，自訂 ${targetClasses.length} 個班別的合併課表 (${targetClasses.join('、')}) (共 ${allTimeSlots.length} 個時間段)。`;
+            if (classSelect.value === 'AUTO_CONFLICTS') {
+                 message = `✅ 成功自動顯示 ${selectedDay}，共 ${targetClasses.length} 個有更改/衝突的班別 (${targetClasses.join('、')}) (共 ${allTimeSlots.length} 個時間段)。`;
+            }
+            resultMessage.textContent = message;
         }
 
         function displayAllClassesSchedule(selectedDay) {
@@ -1663,6 +1863,7 @@
             }).filter(item => item !== null);
         }
 
+        // --- MODIFIED: Save function to use .csav extension ---
         function handleSaveClick() {
             if (scheduleData.length === 0) {
                 adjustmentMessage.textContent = '❌ 無數據可儲存。請先確認排課表已成功載入。';
@@ -1680,14 +1881,14 @@
                 );
                 
                 // 創建一個只包含原始欄位結構和新值的對象
-                return {
-                    '日子': originalRecord['日子'],
-                    '時間': originalRecord['時間'],
-                    '班別': originalRecord['班別'],
-                    '課堂': originalRecord['課堂'], // 這是新值
-                    '上課教師': originalRecord['上課教師'], // 這是新值
-                    // 其他欄位，例如: '可代課教師', 'Room' (如果存在於原始數據)
-                };
+                // 必須包含所有原始欄位，確保載入時能正確匹配
+                const dataToSave = {};
+                const baseFields = Object.keys(scheduleData[0] || {});
+                baseFields.forEach(field => {
+                    dataToSave[field] = originalRecord[field]; // Get the current (modified) value from scheduleData
+                });
+                
+                return dataToSave;
             });
 
 
@@ -1698,12 +1899,14 @@
             }
             
             try {
-                // 為了確保 CSV 檔案包含正確的欄位順序，我們需要一個基線
+                // 確保 CSV 檔案包含正確的欄位順序，我們使用基線欄位
                 const baseFields = Object.keys(scheduleData[0]); 
                 const csv = Papa.unparse(modifiedRecords, { columns: baseFields });
                 
                 const currentDate = new Date().toISOString().slice(0, 10);
-                const filename = `已調整排課表_變更部分_${currentDate}.csv`;
+                // --- CORE MODIFICATION: Change extension to .csav ---
+                const filename = `已調整排課表_變更部分_${currentDate}.csav`;
+                // --- End Modification ---
                 
                 const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
                 
@@ -1729,8 +1932,10 @@
                 console.error("Save Error:", error);
             }
         }
-        
-        // MODIFIED: CSV Report Generation Function
+        // --- END MODIFIED: Save function ---
+
+
+        // MODIFIED: CSV Report Generation Function - ADDING BOM
         function handleGenerateReportCSVClick() {
             if (scheduleData.length === 0) {
                 adjustmentMessage.textContent = '❌ 無數據可生成報告。請先確認排課表已成功載入。';
@@ -1749,17 +1954,25 @@
             
             try {
                 // PapaParse 自動處理標頭和 CSV 格式
-                const csv = Papa.unparse(modifiedRecordsWithOriginal, {
+                const csvContent = Papa.unparse(modifiedRecordsWithOriginal, {
                     // 確保欄位順序符合預期
                     columns: ['日子', '班別', '節數', '時間', '課堂_原', '課堂_新', '教師_原', '教師_新', '修改類型'],
                     // 允許使用中文標頭
                     header: true
                 });
                 
-                const currentDate = new Date().toISOString().slice(0, 10);
-                const filename = `排課調動報告_完整變更清單_${currentDate}.csv`;
+                // --- CORE MODIFICATION: Add BOM to the start of the CSV content ---
+                // UTF-8 BOM bytes: 0xEF, 0xBB, 0xBF
+                const BOM = "\uFEFF"; 
+                const finalCsv = BOM + csvContent; 
+                // --- END CORE MODIFICATION ---
+
                 
-                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const currentDate = new Date().toISOString().slice(0, 10);
+                const filename = `排課調動報告_完整變更清單_${currentDate}.csv`; // Report remains .csv
+                
+                // 使用 finalCsv 創建 Blob
+                const blob = new Blob([finalCsv], { type: 'text/csv;charset=utf-8;' });
                 
                 const link = document.createElement('a');
                 if (link.download !== undefined) { 
@@ -1771,7 +1984,7 @@
                     link.click();
                     document.body.removeChild(link);
                     
-                    adjustmentMessage.textContent = `✅ 成功下載 ${modifiedRecordsWithOriginal.length} 筆已變更的排課報告 (含新舊值) 為檔案：${filename}。`;
+                    adjustmentMessage.textContent = `✅ 成功下載 ${modifiedRecordsWithOriginal.length} 筆已變更的排課報告 (含新舊值) 為檔案：${filename}。報告已添加 BOM 標記以兼容 Excel。`;
                     adjustmentMessage.style.color = 'green';
                 } else {
                     adjustmentMessage.textContent = '⚠️ 您的瀏覽器不完全支援自動下載，請複製以下數據。';
@@ -1790,12 +2003,20 @@
             const file = loadFileInput.files[0];
             
             if (!file) {
-                adjustmentMessage.textContent = '❌ 請先選擇一個 CSV 檔案。';
+                adjustmentMessage.textContent = '❌ 請先選擇一個 CSV 或 CSAV 檔案。';
                 adjustmentMessage.style.color = 'red';
                 return;
             }
             
-            adjustmentMessage.textContent = `⏳ 正在載入檔案 "${file.name}" 並更新排課記錄...`;
+            // --- NEW: File extension check and message adjustment ---
+            const fileName = file.name;
+            let fileTypeMessage = '';
+            if (fileName.toLowerCase().endsWith('.csav')) {
+                 fileTypeMessage = ' (視為 CSV 載入)';
+            }
+            // --- End Modification ---
+
+            adjustmentMessage.textContent = `⏳ 正在載入檔案 "${fileName}"${fileTypeMessage} 並更新排課記錄...`;
             adjustmentMessage.style.color = '#2980b9';
             
             Papa.parse(file, {
@@ -1804,7 +2025,7 @@
                 dynamicTyping: true,
                 complete: function(results) {
                     if (results.data.length === 0) {
-                        adjustmentMessage.textContent = `⚠️ 載入成功，但檔案 "${file.name}" 中沒有有效數據。`;
+                        adjustmentMessage.textContent = `⚠️ 載入成功，但檔案 "${fileName}" 中沒有有效數據。`;
                         adjustmentMessage.style.color = 'orange';
                         return;
                     }
@@ -1830,7 +2051,7 @@
                             autoDaySwitchMessage = ` (已自動切換至 ${singleDay})`;
                         }
                         
-                        adjustmentMessage.textContent = `✅ 成功載入檔案 "${file.name}" (共 ${scheduleData.length} 筆記錄)。已取代原始數據${autoDaySwitchMessage}。`;
+                        adjustmentMessage.textContent = `✅ 成功載入檔案 "${fileName}" (共 ${scheduleData.length} 筆記錄)。已取代原始數據${autoDaySwitchMessage}。`;
                         adjustmentMessage.style.color = 'green';
                         populateControls();
                         return;
@@ -1848,6 +2069,7 @@
                         if (existingRecord) {
                             
                             // 檢查並更新課堂和教師欄位
+                            // 如果載入的檔案有這兩個欄位，則覆蓋
                             const loadedLessonValue = loadedRecord['課堂'] !== undefined ? loadedRecord['課堂'] : existingRecord['課堂'];
                             const loadedTeacherValue = loadedRecord['上課教師'] !== undefined ? loadedRecord['上課教師'] : existingRecord['上課教師'];
                             
@@ -1873,17 +2095,17 @@
 
                     // --- STEP 5: Final Message and Display Update ---
                     if (updateCount > 0) {
-                        adjustmentMessage.textContent = `✅ 成功載入檔案 "${file.name}"，並更新了 ${updateCount} 筆排課記錄${autoDaySwitchMessage}。`;
+                        adjustmentMessage.textContent = `✅ 成功載入檔案 "${fileName}"，並更新了 ${updateCount} 筆排課記錄${autoDaySwitchMessage}。`;
                         adjustmentMessage.style.color = 'green';
                         updateDisplays();
                     } else {
                         if (uniqueDays.length === 1 && autoDaySwitchMessage) {
                              // Only switch day if it was necessary and no updates happened
-                             adjustmentMessage.textContent = `⚠️ 檔案 "${file.name}" 載入完成，沒有找到需要更新的排課記錄${autoDaySwitchMessage}。`;
+                             adjustmentMessage.textContent = `⚠️ 檔案 "${fileName}" 載入完成，沒有找到需要更新的排課記錄${autoDaySwitchMessage}。`;
                              adjustmentMessage.style.color = 'orange';
                              updateDisplays(); // Refresh to the new day
                         } else {
-                            adjustmentMessage.textContent = `⚠️ 檔案 "${file.name}" 載入完成，但沒有找到需要更新的排課記錄。`;
+                            adjustmentMessage.textContent = `⚠️ 檔案 "${fileName}" 載入完成，但沒有找到需要更新的排課記錄。`;
                             adjustmentMessage.style.color = 'orange';
                         }
                     }
@@ -2186,4 +2408,5 @@
     </script>
 
 </body>
+
 </html>
